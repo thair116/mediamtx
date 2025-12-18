@@ -210,7 +210,7 @@ func (s *session) runPublish() (int, error) {
 		return http.StatusNotAcceptable, err
 	}
 
-	answer, err := pc.CreateFullAnswer(offer)
+	answer, err := pc.CreatePartialAnswer(offer)
 	if err != nil {
 		return http.StatusBadRequest, err
 	}
@@ -347,7 +347,7 @@ func (s *session) runRead() (int, error) {
 
 	offer := whipOffer(s.req.offer)
 
-	answer, err := pc.CreateFullAnswer(offer)
+	answer, err := pc.CreatePartialAnswer(offer)
 	if err != nil {
 		return http.StatusBadRequest, err
 	}

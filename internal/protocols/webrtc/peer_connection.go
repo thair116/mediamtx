@@ -653,6 +653,74 @@ func (co *PeerConnection) CreateFullAnswer(offer *webrtc.SessionDescription) (*w
 	return answer, nil
 }
 
+// CreatePartialAnswer creates an answer without waiting for full ICE gathering.
+// This enables ICE trickle - candidates are sent via NewLocalCandidate() as they're discovered.
+// It waits briefly for host candidates (which are gathered immediately) but doesn't wait
+// for STUN/TURN candidates (which can take seconds).
+func (co *PeerConnection) CreatePartialAnswer(offer *webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
+	err := co.wr.SetRemoteDescription(*offer)
+	if err != nil {
+		return nil, err
+	}
+
+	tmp, err := co.wr.CreateAnswer(nil)
+	if err != nil {
+		if errors.Is(err, webrtc.ErrSenderWithNoCodecs) {
+			return nil, fmt.Errorf("codecs not supported by client")
+		}
+		return nil, err
+	}
+	answer := &tmp
+
+	err = co.wr.SetLocalDescription(*answer)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wait briefly for host candidates to be gathered.
+	// Host candidates are discovered immediately (local IPs).
+	// We use a short timeout to avoid blocking on slow STUN/TURN servers.
+	err = co.waitHostCandidates()
+	if err != nil {
+		return nil, err
+	}
+
+	answer = co.wr.LocalDescription()
+
+	answer, err = co.filterLocalDescription(answer)
+	if err != nil {
+		return nil, err
+	}
+
+	return answer, nil
+}
+
+// waitHostCandidates waits for at least one candidate or gathering to complete,
+// with a short timeout to avoid blocking on STUN/TURN.
+func (co *PeerConnection) waitHostCandidates() error {
+	// Host candidates are gathered almost immediately.
+	// 200ms is enough for host candidates but won't wait for STUN (which takes 1-5s).
+	t := time.NewTimer(200 * time.Millisecond)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-co.NewLocalCandidate():
+			// Got at least one candidate, wait a tiny bit more for others
+			time.Sleep(50 * time.Millisecond)
+			return nil
+		case <-co.GatheringDone():
+			// Gathering completed (all candidates found)
+			return nil
+		case <-t.C:
+			// Timeout - proceed with whatever candidates we have
+			return nil
+		case <-co.ctx.Done():
+			return fmt.Errorf("terminated")
+		}
+	}
+}
+
 func (co *PeerConnection) waitGatheringDone() error {
 	for {
 		select {
