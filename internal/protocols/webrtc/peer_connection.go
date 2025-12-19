@@ -747,7 +747,7 @@ outer:
 	for {
 		select {
 		case <-t.C:
-			return fmt.Errorf("deadline exceeded while waiting connection")
+			return fmt.Errorf("deadline exceeded while waiting peer connection")
 
 		case <-co.connected:
 			break outer

@@ -313,6 +313,7 @@ func (s *Server) Initialize() error {
 		str += ", " + s.LocalTCPAddress + " (ICE/TCP)"
 	}
 	s.Log(logger.Info, str)
+	s.Log(logger.Info, "parallel connections enabled (buffered channels)")
 
 	go s.run()
 

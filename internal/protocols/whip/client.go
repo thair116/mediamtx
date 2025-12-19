@@ -140,7 +140,7 @@ outer:
 
 		case <-t.C:
 			c.deleteSession(context.Background()) //nolint:errcheck
-			return fmt.Errorf("deadline exceeded while waiting connection")
+			return fmt.Errorf("deadline exceeded while waiting client connection")
 		}
 	}
 
