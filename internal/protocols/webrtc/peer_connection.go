@@ -307,12 +307,12 @@ func (co *PeerConnection) Start() error {
 	co.rtpPacketsSent = new(uint64)
 	co.rtpPacketsLost = new(uint64)
 
-	co.newLocalCandidate = make(chan *webrtc.ICECandidateInit)
+	co.newLocalCandidate = make(chan *webrtc.ICECandidateInit, 100)
 	co.connected = make(chan struct{})
 	co.failed = make(chan struct{})
 	co.closed = make(chan struct{})
 	co.gatheringDone = make(chan struct{})
-	co.incomingTrack = make(chan trackRecvPair)
+	co.incomingTrack = make(chan trackRecvPair, 10)
 	co.done = make(chan struct{})
 	co.chStartReading = make(chan struct{})
 
@@ -703,12 +703,17 @@ func (co *PeerConnection) waitHostCandidates() error {
 	t := time.NewTimer(200 * time.Millisecond)
 	defer t.Stop()
 
+	gotCandidate := false
+
 	for {
 		select {
 		case <-co.NewLocalCandidate():
-			// Got at least one candidate, wait a tiny bit more for others
-			time.Sleep(50 * time.Millisecond)
-			return nil
+			if !gotCandidate {
+				gotCandidate = true
+				// Reset timer to wait a bit more for additional host candidates
+				t.Reset(50 * time.Millisecond)
+			}
+			// Continue draining - don't block pion's ICE callback
 		case <-co.GatheringDone():
 			// Gathering completed (all candidates found)
 			return nil

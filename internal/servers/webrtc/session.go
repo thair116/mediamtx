@@ -77,8 +77,8 @@ func (s *session) initialize() {
 	s.created = time.Now()
 	s.uuid = uuid.New()
 	s.secret = uuid.New()
-	s.chNew = make(chan webRTCNewSessionReq)
-	s.chAddCandidates = make(chan webRTCAddSessionCandidatesReq)
+	s.chNew = make(chan webRTCNewSessionReq, 1)
+	s.chAddCandidates = make(chan webRTCAddSessionCandidatesReq, 10)
 
 	s.Log(logger.Info, "created by %s", s.req.remoteAddr)
 
