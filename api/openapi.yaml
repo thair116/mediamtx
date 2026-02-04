@@ -369,6 +369,8 @@ components:
           type: string
         sourceOnDemandCloseAfter:
           type: string
+        readTimeout:
+          type: string
         maxReaders:
           type: integer
           format: int64

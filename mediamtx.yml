@@ -482,6 +482,9 @@ pathDefaults:
   # If sourceOnDemand is "yes", the source will be closed when there are no
   # readers connected and this amount of time has passed.
   sourceOnDemandCloseAfter: 10s
+  # Timeout of read operations for this path. This overrides the global
+  # readTimeout and applies to pull sources. Set to 0s to use the global value.
+  readTimeout: 0s
   # Maximum number of readers. Zero means no limit.
   maxReaders: 0
   # SRT encryption passphrase required to read from this path.
