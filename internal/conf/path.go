@@ -117,6 +117,7 @@ type Path struct {
 	SourceOnDemand             bool     `json:"sourceOnDemand"`
 	SourceOnDemandStartTimeout Duration `json:"sourceOnDemandStartTimeout"`
 	SourceOnDemandCloseAfter   Duration `json:"sourceOnDemandCloseAfter"`
+	ReadTimeout                Duration `json:"readTimeout"`
 	MaxReaders                 int      `json:"maxReaders"`
 	SRTReadPassphrase          string   `json:"srtReadPassphrase"`
 	Fallback                   string   `json:"fallback"`

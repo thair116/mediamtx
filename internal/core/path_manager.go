@@ -433,11 +433,16 @@ func (pm *pathManager) createPath(
 	name string,
 	matches []string,
 ) {
+	readTimeout := pm.readTimeout
+	if pathConf.ReadTimeout != 0 {
+		readTimeout = pathConf.ReadTimeout
+	}
+
 	pa := &path{
 		parentCtx:         pm.ctx,
 		logLevel:          pm.logLevel,
 		rtspAddress:       pm.rtspAddress,
-		readTimeout:       pm.readTimeout,
+		readTimeout:       readTimeout,
 		writeTimeout:      pm.writeTimeout,
 		writeQueueSize:    pm.writeQueueSize,
 		udpReadBufferSize: pm.udpReadBufferSize,
