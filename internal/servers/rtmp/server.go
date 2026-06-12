@@ -18,8 +18,9 @@ import (
 	"github.com/bluenviron/mediamtx/internal/defs"
 	"github.com/bluenviron/mediamtx/internal/externalcmd"
 	"github.com/bluenviron/mediamtx/internal/logger"
+	"github.com/bluenviron/mediamtx/internal/packetdumper"
+	"github.com/bluenviron/mediamtx/internal/protocols/proxy"
 	"github.com/bluenviron/mediamtx/internal/restrictnetwork"
-	"github.com/bluenviron/mediamtx/internal/stream"
 )
 
 // ErrConnNotFound is returned when a connection is not found.
@@ -63,8 +64,8 @@ type serverMetrics interface {
 }
 
 type serverPathManager interface {
-	AddPublisher(req defs.PathAddPublisherReq) (defs.Path, *stream.SubStream, error)
-	AddReader(req defs.PathAddReaderReq) (defs.Path, *stream.Stream, error)
+	AddPublisher(req defs.PathAddPublisherReq) (*defs.PathAddPublisherRes, error)
+	AddReader(req defs.PathAddReaderReq) (*defs.PathAddReaderRes, error)
 }
 
 type serverParent interface {
@@ -74,12 +75,14 @@ type serverParent interface {
 // Server is a RTMP server.
 type Server struct {
 	Address             string
+	DumpPackets         bool
 	ReadTimeout         conf.Duration
 	WriteTimeout        conf.Duration
-	IsTLS               bool
+	Encryption          bool
 	ServerCert          string
 	ServerKey           string
 	RTSPAddress         string
+	TrustedProxies      conf.IPNetworks
 	RunOnConnect        string
 	RunOnConnectRestart bool
 	RunOnDisconnect     string
@@ -106,11 +109,57 @@ type Server struct {
 
 // Initialize initializes the server.
 func (s *Server) Initialize() error {
-	ln, err := func() (net.Listener, error) {
-		if !s.IsTLS {
-			return net.Listen(restrictnetwork.Restrict("tcp", s.Address))
+	listen := func(network, address string) (net.Listener, error) {
+		ln, err := net.Listen(network, address)
+		if err != nil {
+			return nil, err
 		}
 
+		if s.DumpPackets {
+			var proto string
+			if s.Encryption {
+				proto = "rtmps"
+			} else {
+				proto = "rtmp"
+			}
+
+			ln = &packetdumper.Listener{
+				Wrapped: ln,
+				Prefix:  proto + "_server_conn",
+			}
+		}
+
+		if len(s.TrustedProxies) > 0 {
+			pl := &proxy.Listener{
+				Wrapped:        ln,
+				TrustedProxies: s.TrustedProxies,
+			}
+			pl.Initialize()
+			ln = pl
+		}
+
+		return ln, nil
+	}
+
+	tlsListen := func(network string, laddr string, config *tls.Config) (net.Listener, error) {
+		ln, err := listen(network, laddr)
+		if err != nil {
+			return nil, err
+		}
+
+		if s.DumpPackets {
+			ln = &packetdumper.TLSListener{
+				Wrapped:   ln,
+				TLSConfig: config,
+			}
+		} else {
+			ln = tls.NewListener(ln, config)
+		}
+
+		return ln, nil
+	}
+
+	if s.Encryption {
 		s.loader = &certloader.CertLoader{
 			CertPath: s.ServerCert,
 			KeyPath:  s.ServerKey,
@@ -118,19 +167,24 @@ func (s *Server) Initialize() error {
 		}
 		err := s.loader.Initialize()
 		if err != nil {
-			return nil, err
+			return err
 		}
 
-		network, address := restrictnetwork.Restrict("tcp", s.Address)
-		return tls.Listen(network, address, &tls.Config{GetCertificate: s.loader.GetCertificate()})
-	}()
-	if err != nil {
-		return err
+		net, addr := restrictnetwork.Restrict("tcp", s.Address)
+		s.ln, err = tlsListen(net, addr, &tls.Config{GetCertificate: s.loader.GetCertificate()})
+		if err != nil {
+			return err
+		}
+	} else {
+		var err error
+		s.ln, err = listen(restrictnetwork.Restrict("tcp", s.Address))
+		if err != nil {
+			return err
+		}
 	}
 
 	s.ctx, s.ctxCancel = context.WithCancel(context.Background())
 
-	s.ln = ln
 	s.conns = make(map[*conn]struct{})
 	s.chNewConn = make(chan net.Conn)
 	s.chAcceptErr = make(chan error)
@@ -139,7 +193,13 @@ func (s *Server) Initialize() error {
 	s.chAPIConnsGet = make(chan serverAPIConnsGetReq)
 	s.chAPIConnsKick = make(chan serverAPIConnsKickReq)
 
-	s.Log(logger.Info, "listener opened on %s", s.Address)
+	str := "started with listener on " + s.Address
+	if s.Encryption {
+		str += " (TCP/RTMPS)"
+	} else {
+		str += " (TCP/RTMP)"
+	}
+	s.Log(logger.Info, str)
 
 	l := &listener{
 		ln:     s.ln,
@@ -152,7 +212,7 @@ func (s *Server) Initialize() error {
 	go s.run()
 
 	if !interfaceIsEmpty(s.Metrics) {
-		if s.IsTLS {
+		if s.Encryption {
 			s.Metrics.SetRTMPSServer(s)
 		} else {
 			s.Metrics.SetRTMPServer(s)
@@ -165,7 +225,7 @@ func (s *Server) Initialize() error {
 // Log implements logger.Writer.
 func (s *Server) Log(level logger.Level, format string, args ...any) {
 	label := func() string {
-		if s.IsTLS {
+		if s.Encryption {
 			return "RTMPS"
 		}
 		return "RTMP"
@@ -175,10 +235,10 @@ func (s *Server) Log(level logger.Level, format string, args ...any) {
 
 // Close closes the server.
 func (s *Server) Close() {
-	s.Log(logger.Info, "listener is closing")
+	s.Log(logger.Info, "closing")
 
 	if !interfaceIsEmpty((s.Metrics)) {
-		if s.IsTLS {
+		if s.Encryption {
 			s.Metrics.SetRTMPSServer(nil)
 		} else {
 			s.Metrics.SetRTMPServer(nil)
@@ -206,7 +266,7 @@ outer:
 		case nconn := <-s.chNewConn:
 			c := &conn{
 				parentCtx:           s.ctx,
-				isTLS:               s.IsTLS,
+				encryption:          s.Encryption,
 				rtspAddress:         s.RTSPAddress,
 				readTimeout:         s.ReadTimeout,
 				writeTimeout:        s.WriteTimeout,
@@ -304,7 +364,7 @@ func (s *Server) closeConn(c *conn) {
 	}
 }
 
-// APIConnsList is called by api.
+// APIConnsList implements defs.APIRTMPServer.
 func (s *Server) APIConnsList() (*defs.APIRTMPConnList, error) {
 	req := serverAPIConnsListReq{
 		res: make(chan serverAPIConnsListRes),
@@ -320,7 +380,7 @@ func (s *Server) APIConnsList() (*defs.APIRTMPConnList, error) {
 	}
 }
 
-// APIConnsGet is called by api.
+// APIConnsGet implements defs.APIRTMPServer.
 func (s *Server) APIConnsGet(uuid uuid.UUID) (*defs.APIRTMPConn, error) {
 	req := serverAPIConnsGetReq{
 		uuid: uuid,
@@ -337,7 +397,7 @@ func (s *Server) APIConnsGet(uuid uuid.UUID) (*defs.APIRTMPConn, error) {
 	}
 }
 
-// APIConnsKick is called by api.
+// APIConnsKick implements defs.APIRTMPServer.
 func (s *Server) APIConnsKick(uuid uuid.UUID) error {
 	req := serverAPIConnsKickReq{
 		uuid: uuid,

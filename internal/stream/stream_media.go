@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/bluenviron/gortsplib/v5/pkg/description"
@@ -11,41 +12,57 @@ import (
 )
 
 type streamMedia struct {
-	media             *description.Media
-	alwaysAvailable   bool
-	rtpMaxPayloadSize int
-	replaceNTP        bool
-	onBytesReceived   func(uint64)
-	onBytesSent       func(uint64)
-	writeRTSP         func(*description.Media, []*rtp.Packet, time.Time)
-	processingErrors  *errordumper.Dumper
-	parent            logger.Writer
+	origMedia            *description.Media
+	alwaysAvailable      bool
+	rtpMaxPayloadSize    int
+	replaceNTP           bool
+	inboundBytes         *atomic.Uint64
+	outboundBytes        *atomic.Uint64
+	updateLastTime       func(time.Duration)
+	writeRTSP            func(*description.Media, []*rtp.Packet, time.Time)
+	updateOutDesc        func(func())
+	inboundFramesInError *errordumper.Dumper
+	parent               logger.Writer
 
-	formats map[format.Format]*streamFormat
+	outMedia *description.Media
+	formats  map[format.Format]*streamFormat
 }
 
 func (sm *streamMedia) initialize() error {
 	sm.formats = make(map[format.Format]*streamFormat)
 
-	for _, forma := range sm.media.Formats {
+	sm.outMedia = &description.Media{
+		Type:    sm.origMedia.Type,
+		ID:      sm.origMedia.ID,
+		Formats: make([]format.Format, len(sm.origMedia.Formats)),
+	}
+
+	for i, origFormat := range sm.origMedia.Formats {
 		sf := &streamFormat{
-			format:            forma,
-			media:             sm.media,
-			alwaysAvailable:   sm.alwaysAvailable,
-			rtpMaxPayloadSize: sm.rtpMaxPayloadSize,
-			replaceNTP:        sm.replaceNTP,
-			processingErrors:  sm.processingErrors,
-			onBytesReceived:   sm.onBytesReceived,
-			onBytesSent:       sm.onBytesSent,
-			writeRTSP:         sm.writeRTSP,
-			parent:            sm.parent,
+			origFormat:           origFormat,
+			alwaysAvailable:      sm.alwaysAvailable,
+			rtpMaxPayloadSize:    sm.rtpMaxPayloadSize,
+			replaceNTP:           sm.replaceNTP,
+			inboundFramesInError: sm.inboundFramesInError,
+			inboundBytes:         sm.inboundBytes,
+			outboundBytes:        sm.outboundBytes,
+			updateLastTime:       sm.updateLastTime,
+			writeRTSP:            sm.writeRTSPWrapper,
+			updateOutDesc:        sm.updateOutDesc,
+			parent:               sm.parent,
 		}
 		err := sf.initialize()
 		if err != nil {
 			return err
 		}
-		sm.formats[forma] = sf
+
+		sm.formats[origFormat] = sf
+		sm.outMedia.Formats[i] = sf.outFormat
 	}
 
 	return nil
+}
+
+func (sm *streamMedia) writeRTSPWrapper(pkts []*rtp.Packet, ntp time.Time) {
+	sm.writeRTSP(sm.outMedia, pkts, ntp)
 }

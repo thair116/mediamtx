@@ -26,7 +26,7 @@ func whipOffer(body []byte) *pwebrtc.SessionDescription {
 }
 
 func TestSource(t *testing.T) {
-	outgoingTracks := []*webrtc.OutgoingTrack{{
+	outboundTracks := []*webrtc.OutboundTrack{{
 		Caps: pwebrtc.RTPCodecCapability{
 			MimeType:    "audio/opus",
 			ClockRate:   48000,
@@ -36,14 +36,11 @@ func TestSource(t *testing.T) {
 	}}
 
 	pc := &webrtc.PeerConnection{
-		LocalRandomUDP:     true,
-		IPsFromInterfaces:  true,
-		Publish:            true,
-		HandshakeTimeout:   conf.Duration(10 * time.Second),
-		TrackGatherTimeout: conf.Duration(2 * time.Second),
-		STUNGatherTimeout:  conf.Duration(5 * time.Second),
-		OutgoingTracks:     outgoingTracks,
-		Log:                test.NilLogger,
+		LocalRandomUDP:    true,
+		IPsFromInterfaces: true,
+		Publish:           true,
+		OutboundTracks:    outboundTracks,
+		Log:               test.NilLogger,
 	}
 	err := pc.Start()
 	require.NoError(t, err)
@@ -71,21 +68,20 @@ func TestSource(t *testing.T) {
 				require.NoError(t, err2)
 				offer := whipOffer(body)
 
-				answer, err2 := pc.CreateFullAnswer(offer)
+				answer, err2 := pc.CreateFullAnswer(offer, false)
 				require.NoError(t, err2)
 
 				w.Header().Set("Content-Type", "application/sdp")
-				w.Header().Set("Accept-Patch", "application/trickle-ice-sdpfrag")
 				w.Header().Set("ETag", "test_etag")
 				w.Header().Set("Location", "/my/resource/sessionid")
 				w.WriteHeader(http.StatusCreated)
 				w.Write([]byte(answer.SDP))
 
 				go func() {
-					err3 := pc.WaitUntilConnected()
+					err3 := pc.WaitUntilConnected(10 * time.Second)
 					require.NoError(t, err3)
 
-					err3 = outgoingTracks[0].WriteRTP(&rtp.Packet{
+					err3 = outboundTracks[0].WriteRTP(&rtp.Packet{
 						Header: rtp.Header{
 							Version:        2,
 							Marker:         true,

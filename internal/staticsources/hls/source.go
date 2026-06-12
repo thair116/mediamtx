@@ -4,7 +4,7 @@ package hls
 import (
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
+	"strings"
 	"time"
 
 	"github.com/bluenviron/gohlslib/v2"
@@ -14,8 +14,9 @@ import (
 	"github.com/bluenviron/mediamtx/internal/defs"
 	"github.com/bluenviron/mediamtx/internal/errordumper"
 	"github.com/bluenviron/mediamtx/internal/logger"
+	"github.com/bluenviron/mediamtx/internal/packetdumper"
 	"github.com/bluenviron/mediamtx/internal/protocols/hls"
-	"github.com/bluenviron/mediamtx/internal/protocols/tls"
+	ptls "github.com/bluenviron/mediamtx/internal/protocols/tls"
 	"github.com/bluenviron/mediamtx/internal/stream"
 )
 
@@ -27,6 +28,7 @@ type parent interface {
 
 // Source is a HLS static source.
 type Source struct {
+	DumpPackets bool
 	ReadTimeout conf.Duration
 	Parent      parent
 }
@@ -59,15 +61,30 @@ func (s *Source) Run(params defs.StaticSourceRunParams) error {
 	decodeErrors.Start()
 	defer decodeErrors.Stop()
 
-	u, err := url.Parse(params.ResolvedSource)
-	if err != nil {
-		return err
-	}
-
-	tr := &http.Transport{
-		TLSClientConfig: tls.MakeConfig(u.Hostname(), params.Conf.SourceFingerprint),
-	}
+	tr := &http.Transport{}
 	defer tr.CloseIdleConnections()
+
+	tlsConfig := ptls.MakeConfig(params.Conf.SourceFingerprint)
+
+	if s.DumpPackets {
+		var proto string
+		if strings.HasPrefix(params.ResolvedSource, "https") {
+			proto = "hlss"
+		} else {
+			proto = "hls"
+		}
+
+		tr.DialContext = (&packetdumper.DialContext{
+			Prefix: proto + "_source_conn",
+		}).Do
+
+		tr.DialTLSContext = (&packetdumper.DialTLSContext{
+			DialContext: tr.DialContext,
+			TLSConfig:   tlsConfig,
+		}).Do
+	} else {
+		tr.TLSClientConfig = tlsConfig
+	}
 
 	jar, _ := cookiejar.New(nil)
 
@@ -115,7 +132,7 @@ func (s *Source) Run(params defs.StaticSourceRunParams) error {
 		},
 	}
 
-	err = c.Start()
+	err := c.Start()
 	if err != nil {
 		return err
 	}
@@ -144,7 +161,7 @@ func (s *Source) Run(params defs.StaticSourceRunParams) error {
 // APISourceDescribe implements StaticSource.
 func (*Source) APISourceDescribe() *defs.APIPathSource {
 	return &defs.APIPathSource{
-		Type: "hlsSource",
+		Type: defs.APIPathSourceTypeHLSSource,
 		ID:   "",
 	}
 }

@@ -2,9 +2,9 @@ package stream
 
 import (
 	"crypto/rand"
+	"sync/atomic"
 	"time"
 
-	"github.com/bluenviron/gortsplib/v5/pkg/description"
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/pion/rtp"
 
@@ -38,38 +38,44 @@ func randUint32() (uint32, error) {
 }
 
 type streamFormat struct {
-	format            format.Format
-	media             *description.Media
-	alwaysAvailable   bool
-	rtpMaxPayloadSize int
-	replaceNTP        bool
-	processingErrors  *errordumper.Dumper
-	onBytesReceived   func(uint64)
-	onBytesSent       func(uint64)
-	writeRTSP         func(*description.Media, []*rtp.Packet, time.Time)
-	parent            logger.Writer
+	origFormat           format.Format
+	alwaysAvailable      bool
+	rtpMaxPayloadSize    int
+	replaceNTP           bool
+	inboundFramesInError *errordumper.Dumper
+	inboundBytes         *atomic.Uint64
+	outboundBytes        *atomic.Uint64
+	updateLastTime       func(time.Duration)
+	writeRTSP            func([]*rtp.Packet, time.Time)
+	updateOutDesc        func(func())
+	parent               logger.Writer
 
-	firstReceived  bool
-	lastPTS        int64
-	lastSystemTime time.Time
-	ptsOffset      int64
-	formatUpdater  formatUpdater
-	unitRemuxer    unitRemuxer
-	rtpEncoder     rtpEncoder
-	rtpTimeOffset  uint32
-	ntpEstimator   *ntpestimator.Estimator
-	onDatas        map[*Reader]OnDataFunc
+	outFormat     format.Format
+	forceRemux    bool
+	ptsOffset     int64
+	formatUpdater formatUpdater
+	unitRemuxer   unitRemuxer
+	rtpEncoder    rtpEncoder
+	rtpTimeOffset uint32
+	ntpEstimator  *ntpestimator.Estimator
+	onDatas       map[*Reader]OnDataFunc
 }
 
 func (sf *streamFormat) initialize() error {
-	sf.lastSystemTime = time.Now()
+	sf.outFormat = cloneFormatShallow(sf.origFormat)
 
-	sf.formatUpdater = newFormatUpdater(sf.format)
-	sf.unitRemuxer = newUnitRemuxer(sf.format)
+	if forma, ok := sf.outFormat.(*format.H264); ok && forma.PacketizationMode == 0 {
+		sf.parent.Log(logger.Info, "remuxing in order to change H264 packetization-mode from 0 to 1")
+		forma.PacketizationMode = 1
+		sf.forceRemux = true
+	}
+
+	sf.formatUpdater = newFormatUpdater(sf.outFormat)
+	sf.unitRemuxer = newUnitRemuxer(sf.outFormat)
 
 	if sf.replaceNTP {
 		sf.ntpEstimator = &ntpestimator.Estimator{
-			ClockRate: sf.format.ClockRate(),
+			ClockRate: sf.outFormat.ClockRate(),
 		}
 	}
 

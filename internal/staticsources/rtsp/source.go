@@ -3,8 +3,8 @@ package rtsp
 
 import (
 	"fmt"
+	"net"
 	"net/url"
-	"regexp"
 	"time"
 
 	"github.com/bluenviron/gortsplib/v5"
@@ -17,8 +17,9 @@ import (
 	"github.com/bluenviron/mediamtx/internal/defs"
 	"github.com/bluenviron/mediamtx/internal/errordumper"
 	"github.com/bluenviron/mediamtx/internal/logger"
+	"github.com/bluenviron/mediamtx/internal/packetdumper"
 	"github.com/bluenviron/mediamtx/internal/protocols/rtsp"
-	"github.com/bluenviron/mediamtx/internal/protocols/tls"
+	ptls "github.com/bluenviron/mediamtx/internal/protocols/tls"
 	"github.com/bluenviron/mediamtx/internal/stream"
 )
 
@@ -75,6 +76,7 @@ type parent interface {
 
 // Source is a RTSP static source.
 type Source struct {
+	DumpPackets       bool
 	ReadTimeout       conf.Duration
 	WriteTimeout      conf.Duration
 	WriteQueueSize    int
@@ -125,43 +127,12 @@ func (s *Source) Run(params defs.StaticSourceRunParams) error {
 		return err
 	}
 
-	var scheme string
-	if u0.Scheme == "rtsp" || u0.Scheme == "rtsp+http" || u0.Scheme == "rtsp+ws" {
-		scheme = "rtsp"
-	} else {
-		scheme = "rtsps"
-	}
-
-	var tunnel gortsplib.Tunnel
-	switch u0.Scheme {
-	case "rtsp+http", "rtsps+http":
-		tunnel = gortsplib.TunnelHTTP
-	case "rtsp+ws", "rtsps+ws":
-		tunnel = gortsplib.TunnelWebSocket
-	default:
-		tunnel = gortsplib.TunnelNone
-	}
-
-	u, err := base.ParseURL(regexp.MustCompile("^.*?://").ReplaceAllString(params.ResolvedSource, "rtsp://"))
-	if err != nil {
-		return err
-	}
-
-	udpReadBufferSize := s.UDPReadBufferSize
-	if params.Conf.RTSPUDPReadBufferSize != nil {
-		udpReadBufferSize = *params.Conf.RTSPUDPReadBufferSize
-	}
-
 	c := &gortsplib.Client{
-		Scheme:            scheme,
-		Host:              u.Host,
-		Tunnel:            tunnel,
 		Protocol:          params.Conf.RTSPTransport.Protocol,
-		TLSConfig:         tls.MakeConfig(u.Hostname(), params.Conf.SourceFingerprint),
 		ReadTimeout:       time.Duration(s.ReadTimeout),
 		WriteTimeout:      time.Duration(s.WriteTimeout),
+		UDPReadBufferSize: int(s.UDPReadBufferSize),
 		WriteQueueSize:    s.WriteQueueSize,
-		UDPReadBufferSize: int(udpReadBufferSize),
 		AnyPortEnable:     params.Conf.RTSPAnyPort,
 		UDPSourcePortRange: [2]uint16{
 			uint16(params.Conf.RTSPUDPSourcePortRange[0]),
@@ -182,6 +153,70 @@ func (s *Source) Run(params defs.StaticSourceRunParams) error {
 		OnDecodeError: func(err error) {
 			decodeErrors.Add(err)
 		},
+	}
+
+	switch u0.Scheme {
+	case "rtsp+http", "rtsps+http":
+		c.Tunnel = gortsplib.TunnelHTTP
+	case "rtsp+ws", "rtsps+ws":
+		c.Tunnel = gortsplib.TunnelWebSocket
+	}
+
+	switch u0.Scheme {
+	case "rtsp", "rtsp+http", "rtsp+ws":
+		u0.Scheme = "rtsp"
+	default:
+		u0.Scheme = "rtsps"
+	}
+
+	u, err := base.ParseURL(u0.String())
+	if err != nil {
+		return err
+	}
+
+	c.Scheme = u.Scheme
+	c.Host = u.Host
+
+	if params.Conf.RTSPUDPReadBufferSize != nil {
+		s.UDPReadBufferSize = *params.Conf.RTSPUDPReadBufferSize
+	}
+
+	tlsConfig := ptls.MakeConfig(params.Conf.SourceFingerprint)
+
+	if s.DumpPackets {
+		c.DialContext = (&packetdumper.DialContext{
+			Prefix: u.Scheme + "_source_conn",
+		}).Do
+
+		c.DialTLSContext = (&packetdumper.DialTLSContext{
+			DialContext: c.DialContext,
+			TLSConfig:   tlsConfig,
+		}).Do
+	} else {
+		c.TLSConfig = tlsConfig
+	}
+
+	c.ListenPacket = func(network, address string) (net.PacketConn, error) {
+		pc, err2 := net.ListenPacket(network, address)
+		if err2 != nil {
+			return nil, err2
+		}
+
+		if s.DumpPackets {
+			pc2 := &packetdumper.PacketConn{
+				Wrapped: pc,
+				Prefix:  u.Scheme + "_source_packet_conn",
+			}
+			err2 = pc2.Initialize()
+			if err2 != nil {
+				pc.Close() //nolint:errcheck
+				return nil, err2
+			}
+
+			pc = pc2
+		}
+
+		return pc, nil
 	}
 
 	err = c.Start()
@@ -276,7 +311,7 @@ func (s *Source) runInner(c *gortsplib.Client, u *base.URL, pathConf *conf.Path)
 // APISourceDescribe implements StaticSource.
 func (*Source) APISourceDescribe() *defs.APIPathSource {
 	return &defs.APIPathSource{
-		Type: "rtspSource",
+		Type: defs.APIPathSourceTypeRTSPSource,
 		ID:   "",
 	}
 }

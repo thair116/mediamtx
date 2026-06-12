@@ -31,7 +31,7 @@ func TestKeepaliveAPIReaderDescribe(t *testing.T) {
 
 	desc := ka.APIReaderDescribe()
 
-	require.Equal(t, "keepalive", desc.Type)
+	require.Equal(t, defs.APIPathReaderType("keepalive"), desc.Type)
 	require.Equal(t, ka.id.String(), desc.ID)
 }
 

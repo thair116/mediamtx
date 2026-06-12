@@ -2,6 +2,7 @@ package rtmp
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/url"
@@ -12,6 +13,9 @@ import (
 	"github.com/bluenviron/gortmplib/pkg/codecs"
 	"github.com/bluenviron/gortsplib/v5/pkg/description"
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
+	"github.com/bluenviron/mediacommon/v2/pkg/codecs/flac"
+	"github.com/bluenviron/mediacommon/v2/pkg/codecs/mpeg4audio"
+	"github.com/bluenviron/mediacommon/v2/pkg/codecs/opus"
 	"github.com/bluenviron/mediamtx/internal/logger"
 	"github.com/bluenviron/mediamtx/internal/stream"
 	"github.com/bluenviron/mediamtx/internal/test"
@@ -223,7 +227,12 @@ func TestFromStream(t *testing.T) {
 			},
 			expectedTracks: []*gortmplib.Track{
 				{Codec: &codecs.Opus{
-					ChannelCount: 2,
+					IDHeader: &opus.IDHeader{
+						Version:             0x1,
+						ChannelCount:        2,
+						PreSkip:             3840,
+						ChannelMappingTable: []uint8{},
+					},
 				}},
 			},
 			writeUnits: func(medias []*description.Media, subStream *stream.SubStream) {
@@ -445,13 +454,55 @@ func TestFromStream(t *testing.T) {
 			},
 		},
 		{
+			name: "flac",
+			medias: []*description.Media{
+				{
+					Formats: []format.Format{&format.Generic{
+						PayloadTyp: 96,
+						RTPMa:      "FLAC/90000",
+						ClockRat:   90000,
+						FMT: map[string]string{
+							"streaminfo": func() string {
+								si := &flac.StreamInfo{
+									SampleRate:   44100,
+									ChannelCount: 2,
+									BitDepth:     16,
+								}
+								enc, err := si.Marshal()
+								require.NoError(t, err)
+
+								return hex.EncodeToString(enc)
+							}(),
+						},
+					}},
+				},
+			},
+			expectedTracks: []*gortmplib.Track{
+				{Codec: &codecs.FLAC{
+					StreamInfo: &flac.StreamInfo{
+						SampleRate:   44100,
+						ChannelCount: 2,
+						BitDepth:     16,
+					},
+				}},
+			},
+			writeUnits: func(medias []*description.Media, subStream *stream.SubStream) {
+				for i := range 2 {
+					subStream.WriteUnit(medias[0], medias[0].Formats[0], &unit.Unit{
+						PTS:     90000 * 5 * int64(i),
+						Payload: unit.PayloadFLAC{3, 4},
+					})
+				}
+			},
+		},
+		{
 			name: "h265 + h264 + vp9 + av1 + opus + aac",
 			medias: []*description.Media{
 				{
 					Formats: []format.Format{&format.H265{}},
 				},
 				{
-					Formats: []format.Format{&format.H264{}},
+					Formats: []format.Format{&format.H264{PacketizationMode: 1}},
 				},
 				{
 					Formats: []format.Format{&format.VP9{}},
@@ -488,7 +539,12 @@ func TestFromStream(t *testing.T) {
 				{Codec: &codecs.VP9{}},
 				{Codec: &codecs.AV1{}},
 				{Codec: &codecs.Opus{
-					ChannelCount: 2,
+					IDHeader: &opus.IDHeader{
+						Version:             0x1,
+						ChannelCount:        2,
+						PreSkip:             3840,
+						ChannelMappingTable: []uint8{},
+					},
 				}},
 				{Codec: &codecs.MPEG4Audio{
 					Config: test.FormatMPEG4Audio.Config,
@@ -560,7 +616,7 @@ func TestFromStream(t *testing.T) {
 			medias := tc.medias
 
 			strm := &stream.Stream{
-				Desc:              &description.Session{Medias: medias},
+				OrigDesc:          &description.Session{Medias: medias},
 				WriteQueueSize:    512,
 				RTPMaxPayloadSize: 1450,
 				Parent:            test.NilLogger,
@@ -617,7 +673,7 @@ func TestFromStream(t *testing.T) {
 
 			r := &stream.Reader{Parent: test.NilLogger}
 
-			err = FromStream(strm.Desc, r, conn, nconn, 10*time.Second)
+			err = FromStream(strm.OrigDesc, strm.OutDescCopy(), r, conn, nconn, 10*time.Second)
 			require.NoError(t, err)
 
 			strm.AddReader(r)
@@ -628,6 +684,163 @@ func TestFromStream(t *testing.T) {
 			<-done
 		})
 	}
+}
+
+func TestFromStreamLegacyClientMultipleTracks(t *testing.T) {
+	// Test that legacy RTMP clients (without enhanced RTMP)
+	// only receive one H264 track and one MPEG4-audio track
+	// when multiple tracks of each type are available
+
+	h264SPS1 := []byte{
+		0x67, 0x42, 0xc0, 0x28, 0xd9, 0x00, 0x78, 0x02,
+		0x27, 0xe5, 0x84, 0x00, 0x00, 0x03, 0x00, 0x04,
+		0x00, 0x00, 0x03, 0x00, 0xf0, 0x3c, 0x60, 0xc9, 0x20,
+	}
+	h264PPS1 := []byte{0x08, 0x06, 0x07, 0x08}
+
+	h264SPS2 := []byte{
+		0x67, 0x42, 0xc0, 0x28, 0xd9, 0x00, 0x78, 0x02,
+		0x27, 0xe5, 0x84, 0x00, 0x00, 0x03, 0x00, 0x04,
+		0x00, 0x00, 0x03, 0x00, 0xf0, 0x3c, 0x60, 0xc9, 0x21,
+	}
+	h264PPS2 := []byte{0x08, 0x06, 0x07, 0x09}
+
+	aacConfig1 := test.FormatMPEG4Audio.Config
+	aacConfig2 := &mpeg4audio.AudioSpecificConfig{
+		Type:          2, // MPEG4-AAC LC
+		SampleRate:    48000,
+		ChannelCount:  2,
+		ChannelConfig: 2,
+	}
+
+	medias := []*description.Media{
+		{
+			Formats: []format.Format{&format.H264{
+				PayloadTyp:        96,
+				PacketizationMode: 1,
+				SPS:               h264SPS1,
+				PPS:               h264PPS1,
+			}},
+		},
+		{
+			Formats: []format.Format{&format.H264{
+				PayloadTyp:        97,
+				PacketizationMode: 1,
+				SPS:               h264SPS2,
+				PPS:               h264PPS2,
+			}},
+		},
+		{
+			Formats: []format.Format{&format.MPEG4Audio{
+				PayloadTyp:       98,
+				Config:           aacConfig1,
+				SizeLength:       13,
+				IndexLength:      3,
+				IndexDeltaLength: 3,
+			}},
+		},
+		{
+			Formats: []format.Format{&format.MPEG4Audio{
+				PayloadTyp:       99,
+				Config:           aacConfig2,
+				SizeLength:       13,
+				IndexLength:      3,
+				IndexDeltaLength: 3,
+			}},
+		},
+	}
+
+	strm := &stream.Stream{
+		OrigDesc:          &description.Session{Medias: medias},
+		WriteQueueSize:    512,
+		RTPMaxPayloadSize: 1450,
+		Parent:            test.NilLogger,
+	}
+	err := strm.Initialize()
+	require.NoError(t, err)
+
+	subStream := &stream.SubStream{
+		Stream:        strm,
+		UseRTPPackets: false,
+	}
+	err = subStream.Initialize()
+	require.NoError(t, err)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:9121")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	done := make(chan struct{})
+
+	go func() {
+		u, err2 := url.Parse("rtmp://127.0.0.1:9121/stream")
+		require.NoError(t, err2)
+
+		c := &gortmplib.Client{
+			URL: u,
+		}
+		err2 = c.Initialize(context.Background())
+		require.NoError(t, err2)
+
+		r := &gortmplib.Reader{
+			Conn: c,
+		}
+		err2 = r.Initialize()
+		require.NoError(t, err2)
+
+		require.Equal(t, []*gortmplib.Track{
+			{Codec: &codecs.H264{
+				SPS: h264SPS1,
+				PPS: h264PPS1,
+			}},
+			{Codec: &codecs.MPEG4Audio{
+				Config: aacConfig1,
+			}},
+		}, r.Tracks())
+
+		close(done)
+	}()
+
+	nconn, err := ln.Accept()
+	require.NoError(t, err)
+	defer nconn.Close()
+
+	conn := &gortmplib.ServerConn{
+		RW: nconn,
+	}
+	err = conn.Initialize()
+	require.NoError(t, err)
+
+	err = conn.Accept()
+	require.NoError(t, err)
+
+	// Simulate a legacy client by clearing the FourCcList
+	conn.FourCcList = []any{}
+
+	r := &stream.Reader{Parent: test.NilLogger}
+
+	err = FromStream(strm.OrigDesc, strm.OutDescCopy(), r, conn, nconn, 10*time.Second)
+	require.NoError(t, err)
+
+	strm.AddReader(r)
+	defer strm.RemoveReader(r)
+
+	// Write units to trigger track setup
+	subStream.WriteUnit(medias[0], medias[0].Formats[0], &unit.Unit{
+		PTS: 0,
+		Payload: unit.PayloadH264{
+			{5, 1}, // IDR
+		},
+	})
+
+	subStream.WriteUnit(medias[2], medias[2].Formats[0], &unit.Unit{
+		PTS: 90000,
+		Payload: unit.PayloadMPEG4Audio{
+			{3, 4},
+		},
+	})
+
+	<-done
 }
 
 func TestFromStreamNoSupportedCodecs(t *testing.T) {
@@ -642,7 +855,9 @@ func TestFromStreamNoSupportedCodecs(t *testing.T) {
 		}),
 	}
 
-	err := FromStream(desc, r, nil, nil, 0)
+	conn := &gortmplib.ServerConn{}
+
+	err := FromStream(desc, desc, r, conn, nil, 0)
 	require.Equal(t, errNoSupportedCodecsFrom, err)
 }
 
@@ -654,7 +869,7 @@ func TestFromStreamSkipUnsupportedTracks(t *testing.T) {
 		},
 		{
 			Type:    description.MediaTypeVideo,
-			Formats: []format.Format{&format.H264{}},
+			Formats: []format.Format{&format.H264{PacketizationMode: 1}},
 		},
 	}}
 
@@ -698,7 +913,7 @@ func TestFromStreamSkipUnsupportedTracks(t *testing.T) {
 	err = conn.Accept()
 	require.NoError(t, err)
 
-	err = FromStream(desc, r, conn, nil, 0)
+	err = FromStream(desc, desc, r, conn, nil, 0)
 	require.NoError(t, err)
 
 	require.Equal(t, 1, n)

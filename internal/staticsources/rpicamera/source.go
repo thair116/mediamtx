@@ -95,7 +95,7 @@ func (r *secondaryReader) Close() {
 // APIReaderDescribe implements reader.
 func (*secondaryReader) APIReaderDescribe() *defs.APIPathReader {
 	return &defs.APIPathReader{
-		Type: "rpiCameraSecondary",
+		Type: defs.APIPathReaderTypeHidden,
 		ID:   "",
 	}
 }
@@ -104,7 +104,7 @@ type parent interface {
 	logger.Writer
 	SetReady(req defs.PathSourceStaticSetReadyReq) defs.PathSourceStaticSetReadyRes
 	SetNotReady(req defs.PathSourceStaticSetNotReadyReq)
-	AddReader(req defs.PathAddReaderReq) (defs.Path, *stream.Stream, error)
+	AddReader(req defs.PathAddReaderReq) (*defs.PathAddReaderRes, error)
 }
 
 // Source is a Raspberry Pi Camera static source.
@@ -171,8 +171,9 @@ func (s *Source) runPrimary(params defs.StaticSourceRunParams) error {
 	}
 
 	encH264 := &rtph264.Encoder{
-		PayloadType:    96,
-		PayloadMaxSize: s.RTPMaxPayloadSize,
+		PayloadType:       96,
+		PayloadMaxSize:    s.RTPMaxPayloadSize,
+		PacketizationMode: 1,
 	}
 	err := encH264.Init()
 	if err != nil {
@@ -294,8 +295,8 @@ func (s *Source) runSecondary(params defs.StaticSourceRunParams) error {
 	rdr := &stream.Reader{Parent: s}
 
 	rdr.OnData(
-		primaryStream.Desc.Medias[1],
-		primaryStream.Desc.Medias[1].Formats[0],
+		primaryStream.OrigDesc.Medias[1],
+		primaryStream.OrigDesc.Medias[1].Formats[0],
 		func(u *unit.Unit) error {
 			pkt := u.RTPPackets[0]
 
@@ -333,7 +334,7 @@ func (s *Source) waitForPrimary(
 	params defs.StaticSourceRunParams,
 ) (defs.Path, *stream.Stream, error) {
 	for {
-		path, primaryStream, err := s.Parent.AddReader(defs.PathAddReaderReq{
+		res, err := s.Parent.AddReader(defs.PathAddReaderReq{
 			Author: r,
 			AccessRequest: defs.PathAccessRequest{
 				Name:     params.Conf.RPICameraPrimaryName,
@@ -341,8 +342,7 @@ func (s *Source) waitForPrimary(
 			},
 		})
 		if err != nil {
-			var err2 defs.PathNoStreamAvailableError
-			if errors.As(err, &err2) {
+			if _, ok := errors.AsType[*defs.PathNoStreamAvailableError](err); ok {
 				select {
 				case <-time.After(pauseBetweenErrors):
 				case <-params.Context.Done():
@@ -354,14 +354,14 @@ func (s *Source) waitForPrimary(
 			return nil, nil, err
 		}
 
-		return path, primaryStream, nil
+		return res.Path, res.Stream, nil
 	}
 }
 
 // APISourceDescribe implements StaticSource.
 func (*Source) APISourceDescribe() *defs.APIPathSource {
 	return &defs.APIPathSource{
-		Type: "rpiCameraSource",
+		Type: defs.APIPathSourceTypeRPICameraSource,
 		ID:   "",
 	}
 }

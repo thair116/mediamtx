@@ -13,6 +13,7 @@ import (
 	"github.com/bluenviron/mediamtx/internal/defs"
 	"github.com/bluenviron/mediamtx/internal/errordumper"
 	"github.com/bluenviron/mediamtx/internal/logger"
+	"github.com/bluenviron/mediamtx/internal/packetdumper"
 	"github.com/bluenviron/mediamtx/internal/protocols/mpegts"
 	"github.com/bluenviron/mediamtx/internal/protocols/udp"
 	"github.com/bluenviron/mediamtx/internal/protocols/unix"
@@ -27,6 +28,7 @@ type parent interface {
 
 // Source is a MPEG-TS static source.
 type Source struct {
+	DumpPackets       bool
 	ReadTimeout       conf.Duration
 	UDPReadBufferSize uint
 	Parent            parent
@@ -50,10 +52,30 @@ func (s *Source) Run(params defs.StaticSourceRunParams) error {
 
 	switch u.Scheme {
 	case "unix+mpegts":
-		nc, err = unix.Listen(u)
+		params := unix.URLToParams(u)
+		l := &unix.Listener{
+			Path: params.Path,
+		}
+
+		if s.DumpPackets {
+			l.Listen = func(network, address string) (net.Listener, error) {
+				ln, err2 := net.Listen(network, address)
+				if err2 != nil {
+					return nil, err2
+				}
+
+				return &packetdumper.Listener{
+					Wrapped: ln,
+					Prefix:  "mpegts_source_unix_conn",
+				}, nil
+			}
+		}
+
+		err = l.Initialize()
 		if err != nil {
 			return err
 		}
+		nc = l
 
 	default:
 		udpReadBufferSize := s.UDPReadBufferSize
@@ -61,10 +83,43 @@ func (s *Source) Run(params defs.StaticSourceRunParams) error {
 			udpReadBufferSize = *params.Conf.MPEGTSUDPReadBufferSize
 		}
 
-		nc, err = udp.Listen(u, int(udpReadBufferSize))
+		params := udp.URLToParams(u)
+
+		l := &udp.Listener{
+			Address:           params.Address,
+			Source:            params.Source,
+			IntfName:          params.IntfName,
+			UDPReadBufferSize: int(udpReadBufferSize),
+		}
+
+		l.ListenPacket = func(network, address string) (net.PacketConn, error) {
+			pc, err2 := net.ListenPacket(network, address)
+			if err2 != nil {
+				return nil, err2
+			}
+
+			if s.DumpPackets {
+				pc2 := &packetdumper.PacketConn{
+					Wrapped: pc,
+					Prefix:  "mpegts_source_packet_conn",
+				}
+				err2 = pc2.Initialize()
+				if err2 != nil {
+					pc.Close() //nolint:errcheck
+					return nil, err2
+				}
+
+				pc = pc2
+			}
+
+			return pc, nil
+		}
+
+		err = l.Initialize()
 		if err != nil {
 			return err
 		}
+		nc = l
 	}
 
 	readerErr := make(chan error)
@@ -145,7 +200,7 @@ func (s *Source) runReader(nc net.Conn) error {
 // APISourceDescribe implements StaticSource.
 func (*Source) APISourceDescribe() *defs.APIPathSource {
 	return &defs.APIPathSource{
-		Type: "mpegtsSource",
+		Type: defs.APIPathSourceTypeMPEGTSSource,
 		ID:   "",
 	}
 }

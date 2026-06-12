@@ -122,6 +122,13 @@ func seekAndMux(
 func (s *Server) onGet(ctx *gin.Context) {
 	pathName := ctx.Query("path")
 
+	// validate path name before passing it to the authentication manager
+	err := conf.IsValidPathName(pathName)
+	if err != nil {
+		s.writeError(ctx, http.StatusBadRequest, fmt.Errorf("invalid path name: %w (%s)", err, pathName))
+		return
+	}
+
 	if !s.doAuth(ctx, pathName) {
 		return
 	}
@@ -174,8 +181,7 @@ func (s *Server) onGet(ctx *gin.Context) {
 	err = seekAndMux(pathConf.RecordFormat, segments, start, duration, m)
 	if err != nil {
 		// user aborted the download
-		var neterr *net.OpError
-		if errors.As(err, &neterr) {
+		if _, ok := errors.AsType[*net.OpError](err); ok {
 			return
 		}
 

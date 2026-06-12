@@ -54,7 +54,7 @@ type connParent interface {
 }
 
 type conn struct {
-	isTLS               bool
+	encryption          bool
 	rtspAddress         string
 	authMethods         []rtspauth.VerifyMethod
 	readTimeout         conf.Duration
@@ -86,11 +86,11 @@ func (c *conn) initialize() {
 		RunOnDisconnect:     c.runOnDisconnect,
 		RTSPAddress:         c.rtspAddress,
 		Desc: defs.APIPathReader{
-			Type: func() string {
-				if c.isTLS {
-					return "rtspsConn"
+			Type: func() defs.APIPathReaderType {
+				if c.encryption {
+					return defs.APIPathReaderTypeRTSPSConn
 				}
-				return "rtspConn"
+				return defs.APIPathReaderTypeRTSPConn
 			}(),
 			ID: c.uuid.String(),
 		},
@@ -151,7 +151,7 @@ func (c *conn) onDescribe(ctx *gortsplib.ServerHandlerOnDescribeCtx,
 		}
 	}
 
-	res := c.pathManager.Describe(defs.PathDescribeReq{
+	res, err := c.pathManager.Describe(defs.PathDescribeReq{
 		AccessRequest: defs.PathAccessRequest{
 			Name:             ctx.Path,
 			Query:            ctx.Query,
@@ -162,29 +162,26 @@ func (c *conn) onDescribe(ctx *gortsplib.ServerHandlerOnDescribeCtx,
 			CustomVerifyFunc: customVerifyFunc,
 		},
 	})
-
-	if res.Err != nil {
-		var terr *auth.Error
-		if errors.As(res.Err, &terr) {
+	if err != nil {
+		if terr, ok := errors.AsType[*auth.Error](err); ok {
 			res, err2 := c.handleAuthError(terr)
 			return res, nil, err2
 		}
 
-		var terr2 defs.PathNoStreamAvailableError
-		if errors.As(res.Err, &terr2) {
+		if _, ok := errors.AsType[*defs.PathNoStreamAvailableError](err); ok {
 			return &base.Response{
 				StatusCode: base.StatusNotFound,
-			}, nil, res.Err
+			}, nil, err
 		}
 
 		return &base.Response{
 			StatusCode: base.StatusBadRequest,
-		}, nil, res.Err
+		}, nil, err
 	}
 
 	if res.Redirect != "" {
 		return &base.Response{
-			StatusCode: base.StatusMovedPermanently,
+			StatusCode: base.StatusFound,
 			Header: base.Header{
 				"Location": base.HeaderValue{absoluteURL(ctx.Request, res.Redirect)},
 			},
@@ -192,10 +189,16 @@ func (c *conn) onDescribe(ctx *gortsplib.ServerHandlerOnDescribeCtx,
 	}
 
 	var strm *gortsplib.ServerStream
-	if !c.isTLS {
-		strm = res.Stream.RTSPStream(c.rserver)
+	if !c.encryption {
+		strm, err = res.Stream.RTSPStream(c.rserver)
 	} else {
-		strm = res.Stream.RTSPSStream(c.rserver)
+		strm, err = res.Stream.RTSPSStream(c.rserver)
+	}
+
+	if err != nil {
+		return &base.Response{
+			StatusCode: base.StatusBadRequest,
+		}, nil, err
 	}
 
 	return &base.Response{
@@ -209,9 +212,6 @@ func (c *conn) handleAuthError(err *auth.Error) (*base.Response, error) {
 			StatusCode: base.StatusUnauthorized,
 		}, liberrors.ErrServerAuth{}
 	}
-
-	// wait some seconds to delay brute force attacks
-	<-time.After(auth.PauseAfterError)
 
 	return &base.Response{
 		StatusCode: base.StatusUnauthorized,
@@ -233,7 +233,9 @@ func (c *conn) apiItem() *defs.APIRTSPConn {
 			return nil
 		}(),
 		Tunnel:        tunnelLabel(c.rconn.Transport().Tunnel),
-		BytesReceived: stats.BytesReceived,
-		BytesSent:     stats.BytesSent,
+		InboundBytes:  stats.InboundBytes,
+		OutboundBytes: stats.OutboundBytes,
+		BytesReceived: stats.InboundBytes,
+		BytesSent:     stats.OutboundBytes,
 	}
 }

@@ -8,10 +8,6 @@ import (
 	"github.com/bluenviron/mediamtx/internal/conf/jsonwrapper"
 )
 
-func ptrOf[T any](v T) *T {
-	return &v
-}
-
 // RTSPTransport is the rtspTransport parameter.
 type RTSPTransport struct {
 	*gortsplib.Protocol
@@ -48,13 +44,13 @@ func (d *RTSPTransport) UnmarshalJSON(b []byte) error {
 
 	switch in {
 	case "udp":
-		d.Protocol = ptrOf(gortsplib.ProtocolUDP)
+		d.Protocol = new(gortsplib.ProtocolUDP)
 
 	case "multicast":
-		d.Protocol = ptrOf(gortsplib.ProtocolUDPMulticast)
+		d.Protocol = new(gortsplib.ProtocolUDPMulticast)
 
 	case "tcp":
-		d.Protocol = ptrOf(gortsplib.ProtocolTCP)
+		d.Protocol = new(gortsplib.ProtocolTCP)
 
 	case "automatic":
 		d.Protocol = nil

@@ -13,7 +13,8 @@ import (
 	"github.com/bluenviron/mediamtx/internal/conf"
 	"github.com/bluenviron/mediamtx/internal/defs"
 	"github.com/bluenviron/mediamtx/internal/logger"
-	"github.com/bluenviron/mediamtx/internal/protocols/tls"
+	"github.com/bluenviron/mediamtx/internal/packetdumper"
+	ptls "github.com/bluenviron/mediamtx/internal/protocols/tls"
 	"github.com/bluenviron/mediamtx/internal/protocols/webrtc"
 	"github.com/bluenviron/mediamtx/internal/protocols/whip"
 	"github.com/bluenviron/mediamtx/internal/stream"
@@ -27,6 +28,7 @@ type parent interface {
 
 // Source is a WebRTC static source.
 type Source struct {
+	DumpPackets       bool
 	ReadTimeout       conf.Duration
 	UDPReadBufferSize uint
 	Parent            parent
@@ -46,12 +48,25 @@ func (s *Source) Run(params defs.StaticSourceRunParams) error {
 		return err
 	}
 
-	u.Scheme = strings.ReplaceAll(u.Scheme, "whep", "http")
-
-	tr := &http.Transport{
-		TLSClientConfig: tls.MakeConfig(u.Hostname(), params.Conf.SourceFingerprint),
-	}
+	tr := &http.Transport{}
 	defer tr.CloseIdleConnections()
+
+	tlsConfig := ptls.MakeConfig(params.Conf.SourceFingerprint)
+
+	if s.DumpPackets {
+		tr.DialContext = (&packetdumper.DialContext{
+			Prefix: u.Scheme + "_source_conn",
+		}).Do
+
+		tr.DialTLSContext = (&packetdumper.DialTLSContext{
+			DialContext: tr.DialContext,
+			TLSConfig:   tlsConfig,
+		}).Do
+	} else {
+		tr.TLSClientConfig = tlsConfig
+	}
+
+	u.Scheme = strings.ReplaceAll(u.Scheme, "whep", "http")
 
 	client := whip.Client{
 		URL: u,
@@ -59,8 +74,12 @@ func (s *Source) Run(params defs.StaticSourceRunParams) error {
 			Timeout:   time.Duration(s.ReadTimeout),
 			Transport: tr,
 		},
-		UDPReadBufferSize: s.UDPReadBufferSize,
-		Log:               s,
+		BearerToken:        params.Conf.WHEPBearerToken,
+		UDPReadBufferSize:  s.UDPReadBufferSize,
+		STUNGatherTimeout:  time.Duration(params.Conf.WHEPSTUNGatherTimeout),
+		HandshakeTimeout:   time.Duration(params.Conf.WHEPHandshakeTimeout),
+		TrackGatherTimeout: time.Duration(params.Conf.WHEPTrackGatherTimeout),
+		Log:                s,
 	}
 	err = client.Initialize(params.Context)
 	if err != nil {
@@ -116,7 +135,7 @@ func (s *Source) Run(params defs.StaticSourceRunParams) error {
 // APISourceDescribe implements StaticSource.
 func (*Source) APISourceDescribe() *defs.APIPathSource {
 	return &defs.APIPathSource{
-		Type: "webRTCSource",
+		Type: defs.APIPathSourceTypeWebRTCSource,
 		ID:   "",
 	}
 }
