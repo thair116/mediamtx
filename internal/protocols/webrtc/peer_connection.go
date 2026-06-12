@@ -132,21 +132,24 @@ type trackRecvPair struct {
 
 // PeerConnection is a wrapper around webrtc.PeerConnection.
 type PeerConnection struct {
-	UDPReadBufferSize     uint
-	LocalRandomUDP        bool
-	ICEUDPMux             ice.UDPMux
-	ICETCPMux             *TCPMuxWrapper
-	ICEServers            []webrtc.ICEServer
-	IPsFromInterfaces     bool
-	IPsFromInterfacesList []string
-	AdditionalHosts       []string
-	HandshakeTimeout      conf.Duration
-	TrackGatherTimeout    conf.Duration
-	STUNGatherTimeout     conf.Duration
-	Publish               bool
-	OutgoingTracks        []*OutgoingTrack
-	OutgoingDataChannels  []*OutgoingDataChannel
-	Log                   logger.Writer
+	UDPReadBufferSize      uint
+	LocalRandomUDP         bool
+	ICEUDPMux              ice.UDPMux
+	ICETCPMux              *TCPMuxWrapper
+	ICEServers             []webrtc.ICEServer
+	IPsFromInterfaces      bool
+	IPsFromInterfacesList  []string
+	AdditionalHosts        []string
+	HandshakeTimeout       conf.Duration
+	TrackGatherTimeout     conf.Duration
+	STUNGatherTimeout      conf.Duration
+	ICEDisconnectedTimeout conf.Duration
+	ICEFailedTimeout       conf.Duration
+	ICEKeepaliveInterval   conf.Duration
+	Publish                bool
+	OutgoingTracks         []*OutgoingTrack
+	OutgoingDataChannels   []*OutgoingDataChannel
+	Log                    logger.Writer
 
 	wr               *webrtc.PeerConnection
 	ctx              context.Context
@@ -192,6 +195,14 @@ func (co *PeerConnection) Start() error {
 	}
 
 	settingsEngine.SetSTUNGatherTimeout(time.Duration(co.STUNGatherTimeout))
+
+	if co.ICEDisconnectedTimeout != 0 || co.ICEFailedTimeout != 0 || co.ICEKeepaliveInterval != 0 {
+		settingsEngine.SetICETimeouts(
+			time.Duration(co.ICEDisconnectedTimeout),
+			time.Duration(co.ICEFailedTimeout),
+			time.Duration(co.ICEKeepaliveInterval),
+		)
+	}
 
 	webrtcNet := &webrtcNet{
 		udpReadBufferSize: int(co.UDPReadBufferSize),

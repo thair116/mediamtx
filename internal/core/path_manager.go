@@ -755,7 +755,7 @@ func (pm *pathManager) doKeepaliveAdd(req pathKeepaliveAddReq) {
 	// Add keepalive as a reader to the path
 	// We do this asynchronously to avoid blocking the path manager
 	pd := pm.paths[req.accessRequest.Name]
-	
+
 	go func() {
 		readerReq := defs.PathAddReaderReq{
 			Author: ka,

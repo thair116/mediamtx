@@ -26,12 +26,15 @@ const (
 
 // Client is a WHIP client.
 type Client struct {
-	URL               *url.URL
-	Publish           bool
-	OutgoingTracks    []*webrtc.OutgoingTrack
-	HTTPClient        *http.Client
-	UDPReadBufferSize uint
-	Log               logger.Writer
+	URL                    *url.URL
+	Publish                bool
+	OutgoingTracks         []*webrtc.OutgoingTrack
+	HTTPClient             *http.Client
+	UDPReadBufferSize      uint
+	ICEDisconnectedTimeout conf.Duration
+	ICEFailedTimeout       conf.Duration
+	ICEKeepaliveInterval   conf.Duration
+	Log                    logger.Writer
 
 	pc               *webrtc.PeerConnection
 	patchIsSupported bool
@@ -45,15 +48,18 @@ func (c *Client) Initialize(ctx context.Context) error {
 	}
 
 	c.pc = &webrtc.PeerConnection{
-		UDPReadBufferSize:  c.UDPReadBufferSize,
-		LocalRandomUDP:     true,
-		ICEServers:         iceServers,
-		IPsFromInterfaces:  true,
-		HandshakeTimeout:   conf.Duration(10 * time.Second),
-		TrackGatherTimeout: conf.Duration(2 * time.Second),
-		Publish:            c.Publish,
-		OutgoingTracks:     c.OutgoingTracks,
-		Log:                c.Log,
+		UDPReadBufferSize:      c.UDPReadBufferSize,
+		LocalRandomUDP:         true,
+		ICEServers:             iceServers,
+		IPsFromInterfaces:      true,
+		HandshakeTimeout:       conf.Duration(10 * time.Second),
+		TrackGatherTimeout:     conf.Duration(2 * time.Second),
+		ICEDisconnectedTimeout: c.ICEDisconnectedTimeout,
+		ICEFailedTimeout:       c.ICEFailedTimeout,
+		ICEKeepaliveInterval:   c.ICEKeepaliveInterval,
+		Publish:                c.Publish,
+		OutgoingTracks:         c.OutgoingTracks,
+		Log:                    c.Log,
 	}
 	err = c.pc.Start()
 	if err != nil {

@@ -186,28 +186,31 @@ type serverParent interface {
 
 // Server is a WebRTC server.
 type Server struct {
-	Address               string
-	Encryption            bool
-	ServerKey             string
-	ServerCert            string
-	AllowOrigins          []string
-	TrustedProxies        conf.IPNetworks
-	ReadTimeout           conf.Duration
-	WriteTimeout          conf.Duration
-	UDPReadBufferSize     uint
-	LocalUDPAddress       string
-	LocalTCPAddress       string
-	IPsFromInterfaces     bool
-	IPsFromInterfacesList []string
-	AdditionalHosts       []string
-	ICEServers            []conf.WebRTCICEServer
-	HandshakeTimeout      conf.Duration
-	TrackGatherTimeout    conf.Duration
-	STUNGatherTimeout     conf.Duration
-	ExternalCmdPool       *externalcmd.Pool
-	Metrics               serverMetrics
-	PathManager           serverPathManager
-	Parent                serverParent
+	Address                string
+	Encryption             bool
+	ServerKey              string
+	ServerCert             string
+	AllowOrigins           []string
+	TrustedProxies         conf.IPNetworks
+	ReadTimeout            conf.Duration
+	WriteTimeout           conf.Duration
+	UDPReadBufferSize      uint
+	LocalUDPAddress        string
+	LocalTCPAddress        string
+	IPsFromInterfaces      bool
+	IPsFromInterfacesList  []string
+	AdditionalHosts        []string
+	ICEServers             []conf.WebRTCICEServer
+	HandshakeTimeout       conf.Duration
+	TrackGatherTimeout     conf.Duration
+	STUNGatherTimeout      conf.Duration
+	ICEDisconnectedTimeout conf.Duration
+	ICEFailedTimeout       conf.Duration
+	ICEKeepaliveInterval   conf.Duration
+	ExternalCmdPool        *externalcmd.Pool
+	Metrics                serverMetrics
+	PathManager            serverPathManager
+	Parent                 serverParent
 
 	ctx              context.Context
 	ctxCancel        func()
@@ -350,21 +353,24 @@ outer:
 		select {
 		case req := <-s.chNewSession:
 			sx := &session{
-				udpReadBufferSize:     s.UDPReadBufferSize,
-				parentCtx:             s.ctx,
-				ipsFromInterfaces:     s.IPsFromInterfaces,
-				ipsFromInterfacesList: s.IPsFromInterfacesList,
-				additionalHosts:       s.AdditionalHosts,
-				iceUDPMux:             s.iceUDPMux,
-				iceTCPMux:             s.iceTCPMux,
-				handshakeTimeout:      s.HandshakeTimeout,
-				trackGatherTimeout:    s.TrackGatherTimeout,
-				stunGatherTimeout:     s.STUNGatherTimeout,
-				req:                   req,
-				wg:                    &wg,
-				externalCmdPool:       s.ExternalCmdPool,
-				pathManager:           s.PathManager,
-				parent:                s,
+				udpReadBufferSize:      s.UDPReadBufferSize,
+				parentCtx:              s.ctx,
+				ipsFromInterfaces:      s.IPsFromInterfaces,
+				ipsFromInterfacesList:  s.IPsFromInterfacesList,
+				additionalHosts:        s.AdditionalHosts,
+				iceUDPMux:              s.iceUDPMux,
+				iceTCPMux:              s.iceTCPMux,
+				handshakeTimeout:       s.HandshakeTimeout,
+				trackGatherTimeout:     s.TrackGatherTimeout,
+				stunGatherTimeout:      s.STUNGatherTimeout,
+				iceDisconnectedTimeout: s.ICEDisconnectedTimeout,
+				iceFailedTimeout:       s.ICEFailedTimeout,
+				iceKeepaliveInterval:   s.ICEKeepaliveInterval,
+				req:                    req,
+				wg:                     &wg,
+				externalCmdPool:        s.ExternalCmdPool,
+				pathManager:            s.PathManager,
+				parent:                 s,
 			}
 			sx.initialize()
 			s.sessions[sx] = struct{}{}

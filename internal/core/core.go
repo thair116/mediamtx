@@ -612,28 +612,31 @@ func (p *Core) createResources(initial bool) error {
 	if p.conf.WebRTC &&
 		p.webRTCServer == nil {
 		i := &webrtc.Server{
-			Address:               p.conf.WebRTCAddress,
-			Encryption:            p.conf.WebRTCEncryption,
-			ServerKey:             p.conf.WebRTCServerKey,
-			ServerCert:            p.conf.WebRTCServerCert,
-			AllowOrigins:          p.conf.WebRTCAllowOrigins,
-			TrustedProxies:        p.conf.WebRTCTrustedProxies,
-			ReadTimeout:           p.conf.ReadTimeout,
-			WriteTimeout:          p.conf.WriteTimeout,
-			UDPReadBufferSize:     p.conf.UDPReadBufferSize,
-			LocalUDPAddress:       p.conf.WebRTCLocalUDPAddress,
-			LocalTCPAddress:       p.conf.WebRTCLocalTCPAddress,
-			IPsFromInterfaces:     p.conf.WebRTCIPsFromInterfaces,
-			IPsFromInterfacesList: p.conf.WebRTCIPsFromInterfacesList,
-			AdditionalHosts:       p.conf.WebRTCAdditionalHosts,
-			ICEServers:            p.conf.WebRTCICEServers2,
-			HandshakeTimeout:      p.conf.WebRTCHandshakeTimeout,
-			STUNGatherTimeout:     p.conf.WebRTCSTUNGatherTimeout,
-			TrackGatherTimeout:    p.conf.WebRTCTrackGatherTimeout,
-			ExternalCmdPool:       p.externalCmdPool,
-			Metrics:               p.metrics,
-			PathManager:           p.pathManager,
-			Parent:                p,
+			Address:                p.conf.WebRTCAddress,
+			Encryption:             p.conf.WebRTCEncryption,
+			ServerKey:              p.conf.WebRTCServerKey,
+			ServerCert:             p.conf.WebRTCServerCert,
+			AllowOrigins:           p.conf.WebRTCAllowOrigins,
+			TrustedProxies:         p.conf.WebRTCTrustedProxies,
+			ReadTimeout:            p.conf.ReadTimeout,
+			WriteTimeout:           p.conf.WriteTimeout,
+			UDPReadBufferSize:      p.conf.UDPReadBufferSize,
+			LocalUDPAddress:        p.conf.WebRTCLocalUDPAddress,
+			LocalTCPAddress:        p.conf.WebRTCLocalTCPAddress,
+			IPsFromInterfaces:      p.conf.WebRTCIPsFromInterfaces,
+			IPsFromInterfacesList:  p.conf.WebRTCIPsFromInterfacesList,
+			AdditionalHosts:        p.conf.WebRTCAdditionalHosts,
+			ICEServers:             p.conf.WebRTCICEServers2,
+			HandshakeTimeout:       p.conf.WebRTCHandshakeTimeout,
+			STUNGatherTimeout:      p.conf.WebRTCSTUNGatherTimeout,
+			TrackGatherTimeout:     p.conf.WebRTCTrackGatherTimeout,
+			ICEDisconnectedTimeout: p.conf.WebRTCICEDisconnectedTimeout,
+			ICEFailedTimeout:       p.conf.WebRTCICEFailedTimeout,
+			ICEKeepaliveInterval:   p.conf.WebRTCICEKeepaliveInterval,
+			ExternalCmdPool:        p.externalCmdPool,
+			Metrics:                p.metrics,
+			PathManager:            p.pathManager,
+			Parent:                 p,
 		}
 		err = i.Initialize()
 		if err != nil {
@@ -914,6 +917,9 @@ func (p *Core) closeResources(newConf *conf.Conf, calledByAPI bool) {
 		newConf.WebRTCHandshakeTimeout != p.conf.WebRTCHandshakeTimeout ||
 		newConf.WebRTCSTUNGatherTimeout != p.conf.WebRTCSTUNGatherTimeout ||
 		newConf.WebRTCTrackGatherTimeout != p.conf.WebRTCTrackGatherTimeout ||
+		newConf.WebRTCICEDisconnectedTimeout != p.conf.WebRTCICEDisconnectedTimeout ||
+		newConf.WebRTCICEFailedTimeout != p.conf.WebRTCICEFailedTimeout ||
+		newConf.WebRTCICEKeepaliveInterval != p.conf.WebRTCICEKeepaliveInterval ||
 		closeMetrics ||
 		closePathManager ||
 		closeLogger

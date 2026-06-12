@@ -41,21 +41,24 @@ type sessionParent interface {
 }
 
 type session struct {
-	udpReadBufferSize     uint
-	parentCtx             context.Context
-	ipsFromInterfaces     bool
-	ipsFromInterfacesList []string
-	additionalHosts       []string
-	iceUDPMux             ice.UDPMux
-	iceTCPMux             *webrtc.TCPMuxWrapper
-	handshakeTimeout      conf.Duration
-	trackGatherTimeout    conf.Duration
-	stunGatherTimeout     conf.Duration
-	req                   webRTCNewSessionReq
-	wg                    *sync.WaitGroup
-	externalCmdPool       *externalcmd.Pool
-	pathManager           serverPathManager
-	parent                sessionParent
+	udpReadBufferSize      uint
+	parentCtx              context.Context
+	ipsFromInterfaces      bool
+	ipsFromInterfacesList  []string
+	additionalHosts        []string
+	iceUDPMux              ice.UDPMux
+	iceTCPMux              *webrtc.TCPMuxWrapper
+	handshakeTimeout       conf.Duration
+	trackGatherTimeout     conf.Duration
+	stunGatherTimeout      conf.Duration
+	iceDisconnectedTimeout conf.Duration
+	iceFailedTimeout       conf.Duration
+	iceKeepaliveInterval   conf.Duration
+	req                    webRTCNewSessionReq
+	wg                     *sync.WaitGroup
+	externalCmdPool        *externalcmd.Pool
+	pathManager            serverPathManager
+	parent                 sessionParent
 
 	ctx       context.Context
 	ctxCancel func()
@@ -159,18 +162,21 @@ func (s *session) runPublish() (int, error) {
 	}
 
 	pc := &webrtc.PeerConnection{
-		UDPReadBufferSize:     s.udpReadBufferSize,
-		ICEUDPMux:             s.iceUDPMux,
-		ICETCPMux:             s.iceTCPMux,
-		ICEServers:            iceServers,
-		IPsFromInterfaces:     s.ipsFromInterfaces,
-		IPsFromInterfacesList: s.ipsFromInterfacesList,
-		AdditionalHosts:       s.additionalHosts,
-		HandshakeTimeout:      s.handshakeTimeout,
-		TrackGatherTimeout:    s.trackGatherTimeout,
-		STUNGatherTimeout:     s.stunGatherTimeout,
-		Publish:               false,
-		Log:                   s,
+		UDPReadBufferSize:      s.udpReadBufferSize,
+		ICEUDPMux:              s.iceUDPMux,
+		ICETCPMux:              s.iceTCPMux,
+		ICEServers:             iceServers,
+		IPsFromInterfaces:      s.ipsFromInterfaces,
+		IPsFromInterfacesList:  s.ipsFromInterfacesList,
+		AdditionalHosts:        s.additionalHosts,
+		HandshakeTimeout:       s.handshakeTimeout,
+		TrackGatherTimeout:     s.trackGatherTimeout,
+		STUNGatherTimeout:      s.stunGatherTimeout,
+		ICEDisconnectedTimeout: s.iceDisconnectedTimeout,
+		ICEFailedTimeout:       s.iceFailedTimeout,
+		ICEKeepaliveInterval:   s.iceKeepaliveInterval,
+		Publish:                false,
+		Log:                    s,
 	}
 	err = pc.Start()
 	if err != nil {
@@ -304,18 +310,21 @@ func (s *session) runRead() (int, error) {
 	}
 
 	pc := &webrtc.PeerConnection{
-		UDPReadBufferSize:     s.udpReadBufferSize,
-		ICEUDPMux:             s.iceUDPMux,
-		ICETCPMux:             s.iceTCPMux,
-		ICEServers:            iceServers,
-		IPsFromInterfaces:     s.ipsFromInterfaces,
-		IPsFromInterfacesList: s.ipsFromInterfacesList,
-		AdditionalHosts:       s.additionalHosts,
-		HandshakeTimeout:      s.handshakeTimeout,
-		TrackGatherTimeout:    s.trackGatherTimeout,
-		STUNGatherTimeout:     s.stunGatherTimeout,
-		Publish:               true,
-		Log:                   s,
+		UDPReadBufferSize:      s.udpReadBufferSize,
+		ICEUDPMux:              s.iceUDPMux,
+		ICETCPMux:              s.iceTCPMux,
+		ICEServers:             iceServers,
+		IPsFromInterfaces:      s.ipsFromInterfaces,
+		IPsFromInterfacesList:  s.ipsFromInterfacesList,
+		AdditionalHosts:        s.additionalHosts,
+		HandshakeTimeout:       s.handshakeTimeout,
+		TrackGatherTimeout:     s.trackGatherTimeout,
+		STUNGatherTimeout:      s.stunGatherTimeout,
+		ICEDisconnectedTimeout: s.iceDisconnectedTimeout,
+		ICEFailedTimeout:       s.iceFailedTimeout,
+		ICEKeepaliveInterval:   s.iceKeepaliveInterval,
+		Publish:                true,
+		Log:                    s,
 	}
 
 	r := &stream.Reader{Parent: s}
