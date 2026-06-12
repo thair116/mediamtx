@@ -975,6 +975,10 @@ func (co *PeerConnection) Stats() *Stats {
 		}
 	}
 
+	reportedV := float64(0)
+	reportedN := float64(0)
+	packetsReportedLost := uint64(0)
+
 	for _, tr := range co.OutboundTracks {
 		if sentStats := tr.rtcpSender.Stats(); sentStats != nil {
 			packetsSent += sentStats.Sent
@@ -983,10 +987,15 @@ func (co *PeerConnection) Stats() *Stats {
 		// for outbound tracks, loss and jitter come from
 		// RTCP receiver reports sent by the remote receiver
 		if lost, jitter, ok := tr.remoteStats(); ok {
-			packetsLost += lost
-			v += jitter
-			n++
+			packetsReportedLost += lost
+			reportedV += jitter
+			reportedN++
 		}
+	}
+
+	var rtpPacketsReportedJitter float64
+	if reportedN != 0 {
+		rtpPacketsReportedJitter = reportedV / reportedN
 	}
 
 	var rtpPacketsJitter float64
@@ -997,13 +1006,15 @@ func (co *PeerConnection) Stats() *Stats {
 	}
 
 	return &Stats{
-		BytesReceived:       bytesReceived,
-		BytesSent:           bytesSent,
-		RTPPacketsReceived:  packetsReceived,
-		RTPPacketsSent:      packetsSent,
-		RTPPacketsLost:      packetsLost,
-		RTPPacketsJitter:    rtpPacketsJitter,
-		RTCPPacketsReceived: co.statsInterceptor.rtcpPacketsReceived.Load(),
-		RTCPPacketsSent:     co.statsInterceptor.rtcpPacketsSent.Load(),
+		BytesReceived:            bytesReceived,
+		BytesSent:                bytesSent,
+		RTPPacketsReceived:       packetsReceived,
+		RTPPacketsSent:           packetsSent,
+		RTPPacketsLost:           packetsLost,
+		RTPPacketsJitter:         rtpPacketsJitter,
+		RTPPacketsReportedLost:   packetsReportedLost,
+		RTPPacketsReportedJitter: rtpPacketsReportedJitter,
+		RTCPPacketsReceived:      co.statsInterceptor.rtcpPacketsReceived.Load(),
+		RTCPPacketsSent:          co.statsInterceptor.rtcpPacketsSent.Load(),
 	}
 }

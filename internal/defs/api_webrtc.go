@@ -42,8 +42,13 @@ type APIWebRTCSession struct {
 	InboundRTCPPackets        uint64                `json:"inboundRTCPPackets"`
 	OutboundBytes             uint64                `json:"outboundBytes"`
 	OutboundRTPPackets        uint64                `json:"outboundRTPPackets"`
-	OutboundRTCPPackets       uint64                `json:"outboundRTCPPackets"`
-	OutboundFramesDiscarded   uint64                `json:"outboundFramesDiscarded"`
+	// loss and jitter (in seconds) reported by the remote receiver
+	// through RTCP receiver reports. Loss is post-NACK/RTX recovery
+	// and monotonically non-decreasing.
+	OutboundRTPPacketsReportedLost   uint64  `json:"outboundRTPPacketsReportedLost"`
+	OutboundRTPPacketsReportedJitter float64 `json:"outboundRTPPacketsReportedJitter"`
+	OutboundRTCPPackets              uint64  `json:"outboundRTCPPackets"`
+	OutboundFramesDiscarded          uint64  `json:"outboundFramesDiscarded"`
 	// deprecated
 	BytesReceived       uint64  `json:"bytesReceived" deprecated:"true"`
 	BytesSent           uint64  `json:"bytesSent" deprecated:"true"`

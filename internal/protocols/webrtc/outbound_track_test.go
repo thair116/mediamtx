@@ -63,4 +63,19 @@ func TestOutboundTrackRemoteStats(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint64(100), lost)
 	require.Equal(t, 0.05, jitter)
+
+	// a report with a lower TotalLost (RTX recovery / duplicates)
+	// must not decrease the exposed value
+	tr.handleIncomingRTCP([]rtcp.Packet{
+		&rtcp.ReceiverReport{
+			Reports: []rtcp.ReceptionReport{{
+				SSRC:      123456,
+				TotalLost: 60,
+				Jitter:    4500,
+			}},
+		},
+	})
+	lost, _, ok = tr.remoteStats()
+	require.True(t, ok)
+	require.Equal(t, uint64(100), lost)
 }

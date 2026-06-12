@@ -429,6 +429,14 @@ webrtcSTUNGatherTimeout: 5s
 webrtcHandshakeTimeout: 10s
 # Maximum time to gather tracks.
 webrtcTrackGatherTimeout: 2s
+# Time without receiving any packet after which an ICE connection
+# is considered disconnected.
+webrtcICEDisconnectedTimeout: 5s
+# Time without receiving any packet after which an ICE connection
+# is considered failed and closed.
+webrtcICEFailedTimeout: 25s
+# Interval between STUN keepalives on established ICE connections.
+webrtcICEKeepaliveInterval: 2s
 
 ###############################################
 # Global settings -> SRT server

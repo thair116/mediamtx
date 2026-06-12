@@ -184,6 +184,7 @@ func goEnumToApi(rt reflect.Type) (openAPISchema, bool) {
 			"rtspsSession",
 			"srtConn",
 			"webRTCSession",
+			"keepalive",
 		}}, true
 
 	case reflect.TypeOf(defs.APIPathTrackCodec("")):

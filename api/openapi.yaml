@@ -580,6 +580,12 @@ components:
           type: string
         webrtcTrackGatherTimeout:
           type: string
+        webrtcICEDisconnectedTimeout:
+          type: string
+        webrtcICEFailedTimeout:
+          type: string
+        webrtcICEKeepaliveInterval:
+          type: string
         webrtcICEUDPMuxAddress:
           type: string
           nullable: true
@@ -1876,6 +1882,19 @@ components:
         outboundRTPPackets:
           type: integer
           format: uint64
+        outboundRTPPacketsReportedLost:
+          type: integer
+          format: uint64
+          description:
+            RTP packets reported as lost by the remote receiver through RTCP
+            receiver reports (post-NACK/RTX recovery). Monotonically
+            non-decreasing.
+        outboundRTPPacketsReportedJitter:
+          type: number
+          format: double
+          description:
+            jitter reported by the remote receiver through RTCP receiver
+            reports, in seconds.
         outboundRTCPPackets:
           type: integer
           format: uint64

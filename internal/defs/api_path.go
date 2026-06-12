@@ -61,6 +61,7 @@ const (
 	APIPathReaderTypeWebRTCSession APIPathReaderType = "webRTCSession"
 	APIPathReaderTypeMoQSession    APIPathReaderType = "moqSession"
 	APIPathReaderTypeHidden        APIPathReaderType = "hidden"
+	APIPathReaderTypeKeepalive     APIPathReaderType = "keepalive"
 )
 
 // APIPathReader is a reader.

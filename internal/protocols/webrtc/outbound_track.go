@@ -20,7 +20,7 @@ type OutboundTrack struct {
 	rtcpSender *rtpsender.Sender
 
 	// loss and jitter reported by the remote receiver through RTCP receiver reports
-	remoteReportedLost   atomic.Int64
+	remoteReportedLost   atomic.Uint64 // maximum seen so far; monotonically non-decreasing
 	remoteReportedJitter atomic.Uint32 // in clock rate units
 	remoteReportPresent  atomic.Bool
 }
@@ -100,7 +100,13 @@ func (t *OutboundTrack) handleIncomingRTCP(pkts []rtcp.Packet) {
 
 		for _, report := range reports {
 			if report.SSRC == t.ssrc {
-				t.remoteReportedLost.Store(int64(report.TotalLost))
+				// TotalLost can decrease when retransmitted packets are counted
+				// as duplicates; keep the maximum so that the value exposed
+				// through the API is monotonically non-decreasing.
+				// this is the only goroutine writing remoteReportedLost.
+				if v := uint64(report.TotalLost); v > t.remoteReportedLost.Load() {
+					t.remoteReportedLost.Store(v)
+				}
 				t.remoteReportedJitter.Store(report.Jitter)
 				t.remoteReportPresent.Store(true)
 			}
@@ -116,11 +122,7 @@ func (t *OutboundTrack) remoteStats() (lost uint64, jitter float64, ok bool) {
 		return 0, 0, false
 	}
 
-	// TotalLost can decrease when retransmitted packets are counted
-	// as duplicates; clamp at zero.
-	if v := t.remoteReportedLost.Load(); v > 0 {
-		lost = uint64(v)
-	}
+	lost = t.remoteReportedLost.Load()
 
 	if clockRate := t.Caps.ClockRate; clockRate != 0 {
 		jitter = float64(t.remoteReportedJitter.Load()) / float64(clockRate)
