@@ -23,6 +23,10 @@ type OutboundTrack struct {
 	remoteReportedLost   atomic.Uint64 // maximum seen so far; monotonically non-decreasing
 	remoteReportedJitter atomic.Uint32 // in clock rate units
 	remoteReportPresent  atomic.Bool
+
+	// recovery-pressure feedback received from the remote receiver
+	nacksReceived atomic.Uint64
+	plisReceived  atomic.Uint64
 }
 
 func (t *OutboundTrack) isVideo() bool {
@@ -85,8 +89,9 @@ func (t *OutboundTrack) setup(p *PeerConnection) error {
 	return nil
 }
 
-// handleIncomingRTCP extracts loss and jitter related to this track
-// from RTCP receiver reports sent by the remote receiver.
+// handleIncomingRTCP extracts loss, jitter and recovery-pressure
+// feedback related to this track from RTCP packets sent by the
+// remote receiver.
 func (t *OutboundTrack) handleIncomingRTCP(pkts []rtcp.Packet) {
 	for _, pkt := range pkts {
 		var reports []rtcp.ReceptionReport
@@ -96,6 +101,16 @@ func (t *OutboundTrack) handleIncomingRTCP(pkts []rtcp.Packet) {
 			reports = rtcpPkt.Reports
 		case *rtcp.SenderReport:
 			reports = rtcpPkt.Reports
+
+		case *rtcp.TransportLayerNack:
+			if rtcpPkt.MediaSSRC == t.ssrc {
+				t.nacksReceived.Add(1)
+			}
+
+		case *rtcp.PictureLossIndication:
+			if rtcpPkt.MediaSSRC == t.ssrc {
+				t.plisReceived.Add(1)
+			}
 		}
 
 		for _, report := range reports {

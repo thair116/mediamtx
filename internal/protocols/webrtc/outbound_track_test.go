@@ -79,3 +79,39 @@ func TestOutboundTrackRemoteStats(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, uint64(100), lost)
 }
+
+func TestOutboundTrackNACKsAndPLIs(t *testing.T) {
+	tr := &OutboundTrack{
+		Caps: webrtc.RTPCodecCapability{
+			MimeType:  webrtc.MimeTypeH264,
+			ClockRate: 90000,
+		},
+		ssrc: 123456,
+	}
+
+	require.Equal(t, uint64(0), tr.nacksReceived.Load())
+	require.Equal(t, uint64(0), tr.plisReceived.Load())
+
+	// NACK and PLI for a different SSRC are ignored
+	tr.handleIncomingRTCP([]rtcp.Packet{
+		&rtcp.TransportLayerNack{MediaSSRC: 999999},
+		&rtcp.PictureLossIndication{MediaSSRC: 999999},
+	})
+	require.Equal(t, uint64(0), tr.nacksReceived.Load())
+	require.Equal(t, uint64(0), tr.plisReceived.Load())
+
+	// NACK and PLI for our SSRC are counted
+	tr.handleIncomingRTCP([]rtcp.Packet{
+		&rtcp.TransportLayerNack{MediaSSRC: 123456},
+		&rtcp.TransportLayerNack{MediaSSRC: 123456},
+		&rtcp.PictureLossIndication{MediaSSRC: 123456},
+	})
+	require.Equal(t, uint64(2), tr.nacksReceived.Load())
+	require.Equal(t, uint64(1), tr.plisReceived.Load())
+
+	// counters are cumulative
+	tr.handleIncomingRTCP([]rtcp.Packet{
+		&rtcp.TransportLayerNack{MediaSSRC: 123456},
+	})
+	require.Equal(t, uint64(3), tr.nacksReceived.Load())
+}

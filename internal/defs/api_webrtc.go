@@ -47,8 +47,15 @@ type APIWebRTCSession struct {
 	// and monotonically non-decreasing.
 	OutboundRTPPacketsReportedLost   uint64  `json:"outboundRTPPacketsReportedLost"`
 	OutboundRTPPacketsReportedJitter float64 `json:"outboundRTPPacketsReportedJitter"`
-	OutboundRTCPPackets              uint64  `json:"outboundRTCPPackets"`
-	OutboundFramesDiscarded          uint64  `json:"outboundFramesDiscarded"`
+	// NACK and PLI packets received from the peer for this session's
+	// outbound streams. Cumulative, never decreasing. Each NACK is a
+	// gap the receiver noticed (recovered or not); each PLI is a
+	// request for a fresh keyframe (a visible freeze/corruption event,
+	// though one PLI at session start is normal).
+	OutboundNACKsReceived   uint64 `json:"outboundNACKsReceived"`
+	OutboundPLIsReceived    uint64 `json:"outboundPLIsReceived"`
+	OutboundRTCPPackets     uint64 `json:"outboundRTCPPackets"`
+	OutboundFramesDiscarded uint64 `json:"outboundFramesDiscarded"`
 	// deprecated
 	BytesReceived       uint64  `json:"bytesReceived" deprecated:"true"`
 	BytesSent           uint64  `json:"bytesSent" deprecated:"true"`

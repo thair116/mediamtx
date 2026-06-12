@@ -730,6 +730,8 @@ func (s *session) apiItem() *defs.APIWebRTCSession {
 	rtpPacketsJitter := float64(0)
 	rtpPacketsReportedLost := uint64(0)
 	rtpPacketsReportedJitter := float64(0)
+	nacksReceived := uint64(0)
+	plisReceived := uint64(0)
 	rtcpPacketsReceived := uint64(0)
 	rtcpPacketsSent := uint64(0)
 	outboundFramesDiscarded := uint64(0)
@@ -747,6 +749,8 @@ func (s *session) apiItem() *defs.APIWebRTCSession {
 		rtpPacketsJitter = stats.RTPPacketsJitter
 		rtpPacketsReportedLost = stats.RTPPacketsReportedLost
 		rtpPacketsReportedJitter = stats.RTPPacketsReportedJitter
+		nacksReceived = stats.NACKsReceived
+		plisReceived = stats.PLIsReceived
 		rtcpPacketsReceived = stats.RTCPPacketsReceived
 		rtcpPacketsSent = stats.RTCPPacketsSent
 	}
@@ -781,6 +785,8 @@ func (s *session) apiItem() *defs.APIWebRTCSession {
 		OutboundRTPPackets:               rtpPacketsSent,
 		OutboundRTPPacketsReportedLost:   rtpPacketsReportedLost,
 		OutboundRTPPacketsReportedJitter: rtpPacketsReportedJitter,
+		OutboundNACKsReceived:            nacksReceived,
+		OutboundPLIsReceived:             plisReceived,
 		OutboundRTCPPackets:              rtcpPacketsSent,
 		OutboundFramesDiscarded:          outboundFramesDiscarded,
 		BytesReceived:                    bytesReceived,

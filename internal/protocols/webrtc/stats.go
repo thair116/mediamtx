@@ -13,6 +13,10 @@ type Stats struct {
 	// RTPPacketsReportedLost is monotonically non-decreasing.
 	RTPPacketsReportedLost   uint64
 	RTPPacketsReportedJitter float64
-	RTCPPacketsReceived      uint64
-	RTCPPacketsSent          uint64
+	// NACK and PLI packets received from the remote receiver,
+	// related to outbound tracks. Cumulative, never decreasing.
+	NACKsReceived       uint64
+	PLIsReceived        uint64
+	RTCPPacketsReceived uint64
+	RTCPPacketsSent     uint64
 }

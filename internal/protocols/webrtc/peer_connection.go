@@ -978,6 +978,8 @@ func (co *PeerConnection) Stats() *Stats {
 	reportedV := float64(0)
 	reportedN := float64(0)
 	packetsReportedLost := uint64(0)
+	nacksReceived := uint64(0)
+	plisReceived := uint64(0)
 
 	for _, tr := range co.OutboundTracks {
 		if sentStats := tr.rtcpSender.Stats(); sentStats != nil {
@@ -991,6 +993,9 @@ func (co *PeerConnection) Stats() *Stats {
 			reportedV += jitter
 			reportedN++
 		}
+
+		nacksReceived += tr.nacksReceived.Load()
+		plisReceived += tr.plisReceived.Load()
 	}
 
 	var rtpPacketsReportedJitter float64
@@ -1014,6 +1019,8 @@ func (co *PeerConnection) Stats() *Stats {
 		RTPPacketsJitter:         rtpPacketsJitter,
 		RTPPacketsReportedLost:   packetsReportedLost,
 		RTPPacketsReportedJitter: rtpPacketsReportedJitter,
+		NACKsReceived:            nacksReceived,
+		PLIsReceived:             plisReceived,
 		RTCPPacketsReceived:      co.statsInterceptor.rtcpPacketsReceived.Load(),
 		RTCPPacketsSent:          co.statsInterceptor.rtcpPacketsSent.Load(),
 	}

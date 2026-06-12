@@ -1938,6 +1938,21 @@ components:
           description:
             jitter reported by the remote receiver through RTCP receiver
             reports, in seconds.
+        outboundNACKsReceived:
+          type: integer
+          format: uint64
+          description:
+            NACK packets received from the peer for this session's outbound
+            streams. Each NACK is a gap the receiver noticed, whether or not
+            it was recovered through retransmission. Cumulative.
+        outboundPLIsReceived:
+          type: integer
+          format: uint64
+          description:
+            Picture Loss Indications received from the peer. A PLI is a
+            request for a fresh keyframe, normally corresponding to a visible
+            freeze or corruption event. One PLI at session start is normal
+            (initial keyframe request). Cumulative.
         outboundRTCPPackets:
           type: integer
           format: uint64
