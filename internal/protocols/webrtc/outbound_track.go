@@ -2,6 +2,7 @@ package webrtc
 
 import (
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/bluenviron/gortsplib/v5/pkg/rtpsender"
@@ -17,6 +18,11 @@ type OutboundTrack struct {
 	track      *webrtc.TrackLocalStaticRTP
 	ssrc       uint32
 	rtcpSender *rtpsender.Sender
+
+	// loss and jitter reported by the remote receiver through RTCP receiver reports
+	remoteReportedLost   atomic.Int64
+	remoteReportedJitter atomic.Uint32 // in clock rate units
+	remoteReportPresent  atomic.Bool
 }
 
 func (t *OutboundTrack) isVideo() bool {
@@ -67,14 +73,60 @@ func (t *OutboundTrack) setup(p *PeerConnection) error {
 				return
 			}
 
-			_, err2 = rtcp.Unmarshal(buf[:n])
+			pkts, err2 := rtcp.Unmarshal(buf[:n])
 			if err2 != nil {
 				panic(err2)
 			}
+
+			t.handleIncomingRTCP(pkts)
 		}
 	}()
 
 	return nil
+}
+
+// handleIncomingRTCP extracts loss and jitter related to this track
+// from RTCP receiver reports sent by the remote receiver.
+func (t *OutboundTrack) handleIncomingRTCP(pkts []rtcp.Packet) {
+	for _, pkt := range pkts {
+		var reports []rtcp.ReceptionReport
+
+		switch rtcpPkt := pkt.(type) {
+		case *rtcp.ReceiverReport:
+			reports = rtcpPkt.Reports
+		case *rtcp.SenderReport:
+			reports = rtcpPkt.Reports
+		}
+
+		for _, report := range reports {
+			if report.SSRC == t.ssrc {
+				t.remoteReportedLost.Store(int64(report.TotalLost))
+				t.remoteReportedJitter.Store(report.Jitter)
+				t.remoteReportPresent.Store(true)
+			}
+		}
+	}
+}
+
+// remoteStats returns loss and jitter reported by the remote receiver.
+// Jitter is converted into seconds. ok is false if no receiver report
+// has been received yet.
+func (t *OutboundTrack) remoteStats() (lost uint64, jitter float64, ok bool) {
+	if !t.remoteReportPresent.Load() {
+		return 0, 0, false
+	}
+
+	// TotalLost can decrease when retransmitted packets are counted
+	// as duplicates; clamp at zero.
+	if v := t.remoteReportedLost.Load(); v > 0 {
+		lost = uint64(v)
+	}
+
+	if clockRate := t.Caps.ClockRate; clockRate != 0 {
+		jitter = float64(t.remoteReportedJitter.Load()) / float64(clockRate)
+	}
+
+	return lost, jitter, true
 }
 
 func (t *OutboundTrack) close() {

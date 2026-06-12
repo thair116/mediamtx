@@ -979,6 +979,14 @@ func (co *PeerConnection) Stats() *Stats {
 		if sentStats := tr.rtcpSender.Stats(); sentStats != nil {
 			packetsSent += sentStats.Sent
 		}
+
+		// for outbound tracks, loss and jitter come from
+		// RTCP receiver reports sent by the remote receiver
+		if lost, jitter, ok := tr.remoteStats(); ok {
+			packetsLost += lost
+			v += jitter
+			n++
+		}
 	}
 
 	var rtpPacketsJitter float64
