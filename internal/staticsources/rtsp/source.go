@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/bluenviron/gortsplib/v5"
 	"github.com/bluenviron/gortsplib/v5/pkg/base"
 	"github.com/bluenviron/gortsplib/v5/pkg/description"
+	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/bluenviron/gortsplib/v5/pkg/headers"
+	"github.com/pion/rtp"
 
 	"github.com/bluenviron/mediamtx/internal/conf"
 	"github.com/bluenviron/mediamtx/internal/counterdumper"
@@ -82,6 +85,10 @@ type Source struct {
 	WriteQueueSize    int
 	UDPReadBufferSize uint
 	Parent            parent
+
+	mutex   sync.Mutex
+	client  *gortsplib.Client
+	tracker *pullTracker
 }
 
 // Log implements logger.Writer.
@@ -225,6 +232,18 @@ func (s *Source) Run(params defs.StaticSourceRunParams) error {
 	}
 	defer c.Close()
 
+	s.mutex.Lock()
+	s.client = c
+	s.tracker = &pullTracker{}
+	s.mutex.Unlock()
+
+	defer func() {
+		s.mutex.Lock()
+		s.client = nil
+		s.tracker = nil
+		s.mutex.Unlock()
+	}()
+
 	readErr := make(chan error)
 	go func() {
 		readErr <- s.runInner(c, u, params.Conf)
@@ -275,8 +294,12 @@ func (s *Source) runInner(c *gortsplib.Client, u *base.URL, pathConf *conf.Path)
 
 	var subStream *stream.SubStream
 
+	s.mutex.Lock()
+	tracker := s.tracker
+	s.mutex.Unlock()
+
 	rtsp.ToStream(
-		c,
+		&trackedSource{Client: c, tracker: tracker},
 		desc2.Medias,
 		pathConf,
 		&subStream,
@@ -309,9 +332,44 @@ func (s *Source) runInner(c *gortsplib.Client, u *base.URL, pathConf *conf.Path)
 }
 
 // APISourceDescribe implements StaticSource.
-func (*Source) APISourceDescribe() *defs.APIPathSource {
-	return &defs.APIPathSource{
+func (s *Source) APISourceDescribe() *defs.APIPathSource {
+	out := &defs.APIPathSource{
 		Type: defs.APIPathSourceTypeRTSPSource,
 		ID:   "",
 	}
+
+	s.mutex.Lock()
+	c := s.client
+	tracker := s.tracker
+	s.mutex.Unlock()
+
+	if c != nil {
+		stats := c.Stats()
+		out.InboundBytes = &stats.Session.InboundBytes
+		out.InboundRTPPackets = &stats.Session.InboundRTPPackets
+		out.InboundRTPPacketsLost = &stats.Session.InboundRTPPacketsLost
+		out.InboundRTPPacketsJitter = &stats.Session.InboundRTPPacketsJitter
+	}
+
+	if tracker != nil {
+		out.LastPacketTime, out.SourceLagSeconds = tracker.stats()
+	}
+
+	return out
+}
+
+// trackedSource wraps a gortsplib.Client and feeds every RTP packet
+// into a pullTracker before handing it to the stream.
+type trackedSource struct {
+	*gortsplib.Client
+	tracker *pullTracker
+}
+
+func (ts *trackedSource) OnPacketRTP(medi *description.Media, forma format.Format, cb gortsplib.OnPacketRTPFunc) {
+	tt := ts.tracker.addTrack(forma.ClockRate())
+
+	ts.Client.OnPacketRTP(medi, forma, func(pkt *rtp.Packet) {
+		ts.tracker.onPacket(tt, pkt.Timestamp, time.Now())
+		cb(pkt)
+	})
 }

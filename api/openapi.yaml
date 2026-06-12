@@ -1075,6 +1075,49 @@ components:
           $ref: "#/components/schemas/PathSourceType"
         id:
           type: string
+        inboundBytes:
+          type: integer
+          format: uint64
+          nullable: true
+          description:
+            bytes received from the source. Populated for RTSP/RTSPS pull
+            sources only.
+        inboundRTPPackets:
+          type: integer
+          format: uint64
+          nullable: true
+          description:
+            RTP packets received from the source. Populated for RTSP/RTSPS
+            pull sources only.
+        inboundRTPPacketsLost:
+          type: integer
+          format: uint64
+          nullable: true
+          description:
+            RTP packets lost (sequence number gaps). Since sequence numbers
+            pass through relays unchanged, this includes loss on upstream
+            hops. Populated for RTSP/RTSPS pull sources only.
+        inboundRTPPacketsJitter:
+          type: number
+          format: double
+          nullable: true
+          description:
+            mean jitter of RTP packets received from the source, in seconds.
+            Populated for RTSP/RTSPS pull sources only.
+        lastPacketTime:
+          type: string
+          nullable: true
+          description:
+            wallclock time of the most recent RTP packet on any track of the
+            source. Populated for RTSP/RTSPS pull sources only.
+        sourceLagSeconds:
+          type: number
+          format: double
+          nullable: true
+          description:
+            how far delivery is behind real time, in seconds, smoothed with
+            an exponential moving average and clamped at zero. Populated for
+            RTSP/RTSPS pull sources only.
 
     PathReader:
       type: object

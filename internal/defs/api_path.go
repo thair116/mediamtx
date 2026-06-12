@@ -43,6 +43,18 @@ const (
 type APIPathSource struct {
 	Type APIPathSourceType `json:"type"`
 	ID   string            `json:"id"`
+
+	// statistics of the connection between this server and the source.
+	// They are currently populated for RTSP/RTSPS pull sources only;
+	// null for other source types.
+	InboundBytes            *uint64  `json:"inboundBytes"`
+	InboundRTPPackets       *uint64  `json:"inboundRTPPackets"`
+	InboundRTPPacketsLost   *uint64  `json:"inboundRTPPacketsLost"`
+	InboundRTPPacketsJitter *float64 `json:"inboundRTPPacketsJitter"`
+	// wallclock time of the most recent RTP packet on any track.
+	LastPacketTime *time.Time `json:"lastPacketTime"`
+	// how far delivery is behind real time, in seconds (EWMA-smoothed).
+	SourceLagSeconds *float64 `json:"sourceLagSeconds"`
 }
 
 // APIPathReaderType is the type of a path reader.

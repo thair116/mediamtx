@@ -288,7 +288,6 @@ func (a *API) onAuthJwksRefresh(ctx *gin.Context) {
 	a.writeOK(ctx)
 }
 
-
 // ReloadConf is called by core.
 func (a *API) ReloadConf(conf *conf.Conf) {
 	a.mutex.Lock()
