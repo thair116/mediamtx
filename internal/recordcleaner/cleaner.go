@@ -3,6 +3,8 @@ package recordcleaner
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,7 +16,35 @@ import (
 	"github.com/bluenviron/mediamtx/internal/recordstore"
 )
 
-var timeNow = time.Now
+var (
+	timeNow                    = time.Now
+	removeFile                 = os.Remove
+	cleanAfterRetentionShorten = time.Second
+)
+
+type cleanStats struct {
+	removedSegments int
+	removedBytes    int64
+	paths           int
+	oldestStart     time.Time
+	oldestPath      string
+	newestStart     time.Time
+	newestPath      string
+}
+
+func (s *cleanStats) merge(other cleanStats) {
+	s.removedSegments += other.removedSegments
+	s.removedBytes += other.removedBytes
+	s.paths += other.paths
+	if s.oldestStart.IsZero() || (!other.oldestStart.IsZero() && other.oldestStart.Before(s.oldestStart)) {
+		s.oldestStart = other.oldestStart
+		s.oldestPath = other.oldestPath
+	}
+	if other.newestStart.After(s.newestStart) {
+		s.newestStart = other.newestStart
+		s.newestPath = other.newestPath
+	}
+}
 
 // Cleaner removes expired recording segments from disk.
 type Cleaner struct {
@@ -45,7 +75,7 @@ func (c *Cleaner) Close() {
 
 // Log implements logger.Writer.
 func (c *Cleaner) Log(level logger.Level, format string, args ...any) {
-	c.Parent.Log(level, "[record cleaner]"+format, args...)
+	c.Parent.Log(level, "[record cleaner] "+format, args...)
 }
 
 // ReloadPathConfs is called by core.Core.
@@ -59,20 +89,66 @@ func (c *Cleaner) ReloadPathConfs(pathConfs map[string]*conf.Path) {
 func (c *Cleaner) run() {
 	defer close(c.done)
 
-	c.doRun() //nolint:errcheck
+	c.doRun()
+
+	nextRun := time.Now().Add(c.cleanInterval())
+	timer := time.NewTimer(time.Until(nextRun))
+	defer timer.Stop()
 
 	for {
 		select {
-		case <-time.After(c.cleanInterval()):
+		case <-timer.C:
 			c.doRun()
+			nextRun = time.Now().Add(c.cleanInterval())
+			timer.Reset(time.Until(nextRun))
 
 		case cnf := <-c.chReloadConf:
+			shortened := retentionShortened(c.PathConfs, cnf)
 			c.PathConfs = cnf
+			if shortened {
+				// Config changes can arrive once per path. Coalesce them into an
+				// early sweep, but never let later reloads postpone that sweep.
+				candidate := time.Now().Add(cleanAfterRetentionShorten)
+				if candidate.Before(nextRun) {
+					nextRun = candidate
+					resetTimer(timer, time.Until(nextRun))
+				}
+			}
 
 		case <-c.ctx.Done():
 			return
 		}
 	}
+}
+
+func resetTimer(timer *time.Timer, delay time.Duration) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	if delay < 0 {
+		delay = 0
+	}
+	timer.Reset(delay)
+}
+
+// retentionShortened reports whether a reload made any path newly eligible
+// for earlier deletion. A new path is included: it can point at recordings
+// which predate the in-memory configuration.
+func retentionShortened(oldConfs, newConfs map[string]*conf.Path) bool {
+	for name, newConf := range newConfs {
+		if newConf.RecordDeleteAfter == 0 {
+			continue
+		}
+		oldConf, ok := oldConfs[name]
+		if !ok || oldConf.RecordDeleteAfter == 0 ||
+			newConf.RecordDeleteAfter < oldConf.RecordDeleteAfter {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Cleaner) cleanInterval() time.Duration {
@@ -92,45 +168,95 @@ func (c *Cleaner) doRun() {
 	now := timeNow()
 
 	pathNames := recordstore.FindAllPathsWithSegments(c.PathConfs)
+	var total cleanStats
 
 	for _, pathName := range pathNames {
-		c.processPath(now, pathName) //nolint:errcheck
+		stats, err := c.processPath(now, pathName)
+		total.merge(stats)
+		if err != nil {
+			c.Log(logger.Warn, "cleanup failed for path %q: %v", pathName, err)
+		}
+	}
+
+	if total.removedSegments > 0 {
+		c.Log(logger.Info,
+			"removed %d segment(s), reclaimed %d byte(s) across %d path(s), oldest=%q (%s), newest=%q (%s)",
+			total.removedSegments,
+			total.removedBytes,
+			total.paths,
+			total.oldestPath,
+			total.oldestStart.Format(time.RFC3339Nano),
+			total.newestPath,
+			total.newestStart.Format(time.RFC3339Nano))
 	}
 }
 
-func (c *Cleaner) processPath(now time.Time, pathName string) error {
+func (c *Cleaner) processPath(now time.Time, pathName string) (cleanStats, error) {
 	pathConf, _, err := conf.FindPathConf(c.PathConfs, pathName)
 	if err != nil {
-		return err
+		return cleanStats{}, err
 	}
 
 	if pathConf.RecordDeleteAfter == 0 {
-		return nil
+		return cleanStats{}, nil
 	}
 
-	err = c.deleteExpiredSegments(now, pathName, pathConf)
+	stats, err := c.deleteExpiredSegments(now, pathName, pathConf)
 	if err != nil {
-		return err
+		return stats, err
 	}
 
 	c.deleteEmptyDirs(pathConf)
 
-	return nil
+	return stats, nil
 }
 
-func (c *Cleaner) deleteExpiredSegments(now time.Time, pathName string, pathConf *conf.Path) error {
+func (c *Cleaner) deleteExpiredSegments(
+	now time.Time,
+	pathName string,
+	pathConf *conf.Path,
+) (cleanStats, error) {
 	end := now.Add(-time.Duration(pathConf.RecordDeleteAfter))
 	segments, err := recordstore.FindSegments(pathConf, pathName, nil, &end)
 	if err != nil {
-		return err
+		if errors.Is(err, recordstore.ErrNoSegmentsFound) {
+			return cleanStats{}, nil
+		}
+		return cleanStats{}, err
 	}
 
+	var stats cleanStats
+	var removeErrors []error
 	for _, seg := range segments {
-		c.Log(logger.Debug, "removing %s", seg.Fpath)
-		os.Remove(seg.Fpath)
+		info, statErr := os.Stat(seg.Fpath)
+		if statErr != nil {
+			if !errors.Is(statErr, os.ErrNotExist) {
+				removeErrors = append(removeErrors, fmt.Errorf("stat %q: %w", seg.Fpath, statErr))
+			}
+			continue
+		}
+		if removeErr := removeFile(seg.Fpath); removeErr != nil {
+			if !errors.Is(removeErr, os.ErrNotExist) {
+				removeErrors = append(removeErrors, fmt.Errorf("remove %q: %w", seg.Fpath, removeErr))
+			}
+			continue
+		}
+		stats.removedSegments++
+		stats.removedBytes += info.Size()
+		if stats.oldestStart.IsZero() || seg.Start.Before(stats.oldestStart) {
+			stats.oldestStart = seg.Start
+			stats.oldestPath = seg.Fpath
+		}
+		if seg.Start.After(stats.newestStart) {
+			stats.newestStart = seg.Start
+			stats.newestPath = seg.Fpath
+		}
+	}
+	if stats.removedSegments > 0 {
+		stats.paths = 1
 	}
 
-	return nil
+	return stats, errors.Join(removeErrors...)
 }
 
 func (c *Cleaner) deleteEmptyDirs(pathConf *conf.Path) {
